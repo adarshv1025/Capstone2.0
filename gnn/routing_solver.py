@@ -40,18 +40,34 @@ class RoutingSolver:
 
     def __init__(self, costs_df: pd.DataFrame):
         self.costs_df = costs_df
-        # Min-max stats per raw cost column, used to bring the 4 objectives
-        # onto a comparable [0,1] scale before combining into one edge weight.
-        self._mins = costs_df[self.COST_COLUMNS].min()
-        self._maxs = costs_df[self.COST_COLUMNS].max()
+        # Robust min-max stats per raw cost column: the 1st/99th
+        # percentiles, not the true min/max. travel_time_s, carbon_kg, and
+        # ev_energy_pct are all heavily right-skewed (a handful of outlier
+        # edges dwarf the typical edge), so scaling by the true max squeezes
+        # the typical edge's normalized value near 0 -- which lets
+        # delay_probability (roughly bell-shaped, no long tail) dominate
+        # any mixed-weight route regardless of its relative weight.
+        # Clipping to [p1, p99] before min-max scaling keeps all 4
+        # objectives comparably sensitive to weight changes.
+        self._mins = costs_df[self.COST_COLUMNS].quantile(0.01)
+        self._maxs = costs_df[self.COST_COLUMNS].quantile(0.99)
 
     def _normalized(self, col, value):
         lo, hi = self._mins[col], self._maxs[col]
         if hi - lo < 1e-9:
             return 0.0
-        return (value - lo) / (hi - lo)
+        clipped = min(max(value, lo), hi)
+        return (clipped - lo) / (hi - lo)
 
-    def build_graph(self, weights: dict) -> nx.DiGraph:
+    def build_graph(self, weights: dict, penalized_edges: set = None, penalty_factor: float = 5.0) -> nx.DiGraph:
+        """
+        penalized_edges: optional set of (src, dst) tuples whose scalar
+        cost gets multiplied by penalty_factor -- used by the Coordinator
+        (agents/coordinator_agent.py, Phase 4) to steer a re-route away
+        from a congested edge without hard-excluding it (a multiplicative
+        penalty degrades gracefully if there's no good alternative, instead
+        of risking NetworkXNoPath).
+        """
         w = {
             "time": weights.get("time", 0.25),
             "delay": weights.get("delay", 0.25),
@@ -60,6 +76,7 @@ class RoutingSolver:
         }
         total_w = sum(w.values()) or 1.0
         w = {k: v / total_w for k, v in w.items()}
+        penalized_edges = penalized_edges or set()
 
         G = nx.DiGraph()
         for row in self.costs_df.itertuples(index=False):
@@ -69,6 +86,8 @@ class RoutingSolver:
                 w["carbon"] * self._normalized("carbon_kg", row.carbon_kg) +
                 w["ev"]     * self._normalized("ev_energy_pct", row.ev_energy_pct)
             )
+            if (row.src, row.dst) in penalized_edges:
+                scalar_cost *= penalty_factor
             G.add_edge(
                 row.src, row.dst,
                 weight=scalar_cost,
@@ -79,7 +98,9 @@ class RoutingSolver:
             )
         return G
 
-    def find_route(self, source, target, weights: dict = None) -> dict:
+    def find_route(
+        self, source, target, weights: dict = None, penalized_edges: set = None, penalty_factor: float = 5.0
+    ) -> dict:
         """
         Returns a dict with the path and route-level totals, or
         {"success": False, "reason": ...} if no path exists.
@@ -89,7 +110,7 @@ class RoutingSolver:
         which isn't statistically valid and can exceed 1.
         """
         weights = weights or {"time": 0.25, "delay": 0.25, "carbon": 0.25, "ev": 0.25}
-        G = self.build_graph(weights)
+        G = self.build_graph(weights, penalized_edges=penalized_edges, penalty_factor=penalty_factor)
 
         try:
             path = nx.shortest_path(G, source, target, weight="weight")

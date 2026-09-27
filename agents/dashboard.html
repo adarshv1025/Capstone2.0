@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESG Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --border: rgba(11,11,11,0.10);
+    --good: #0ca30c;
+    --critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --border: rgba(255,255,255,0.10);
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --border: rgba(255,255,255,0.10);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+    padding: 16px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 600; margin: 4px 0 4px; }
+  .subtitle { color: var(--text-secondary); font-size: 14px; margin: 0 0 20px; }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card .label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+  .card .value { font-size: 24px; font-weight: 600; }
+  .card .value.good { color: var(--good); }
+  .card .value.critical { color: var(--critical); }
+  .panel {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+  .panel h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+  .narrative {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .narrative .tag {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  canvas { max-height: 320px; }
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .charts-row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ESG Dashboard</h1>
+  <p class="subtitle">Intelligent Decentralized Logistics Framework &mdash; Bengaluru</p>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="narrative">
+    <div class="tag">ESG Reporter summary</div>
+    <div id="narrative-text"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Planned vs. simulated-actual time per route (mixed_priority scenario)</h2>
+    <canvas id="routeTimeChart"></canvas>
+  </div>
+
+  <div class="charts-row">
+    <div class="panel">
+      <h2>Total planned time by system, per scenario</h2>
+      <canvas id="systemTimeChart"></canvas>
+    </div>
+    <div class="panel">
+      <h2>Total planned carbon by system, per scenario</h2>
+      <canvas id="systemCarbonChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA = {"cards": [{"label": "Total planned distance-time", "value": "11,415 s"}, {"label": "Total actual (simulated) time", "value": "15,203 s"}, {"label": "Total planned carbon", "value": "25.5 kg"}, {"label": "Total actual (simulated) carbon", "value": "33.9 kg"}, {"label": "Mean abs. time deviation", "value": "33.8%"}, {"label": "EV feasibility rate", "value": "100.0%", "status": "good"}, {"label": "Negotiation rounds used", "value": "3"}, {"label": "Carbon saved by optimizer", "value": "1.1 kg"}], "summary_text": "All five delivery requests were successfully routed with zero unassigned or failed routes, and every request was EV\u2011compatible (100% feasibility). However, the batch only met its on\u2011time target for 40% of the trips, and actual travel time (\u224815,200\u202fs or 4.2\u202fh) was about 33% longer than planned, leading to a carbon increase from 25.5\u202fkg to 33.9\u202fkg. The carbon optimizer did make a positive impact, accepting 2 of 5 evaluated swaps and saving roughly 1.1\u202fkg of CO\u2082. Negotiation overhead was modest, requiring just three rounds for the entire batch.", "per_route": [{"request_id": "mp-0", "planned_time_s": 833.1948609, "actual_time_s": 1175.900720822206}, {"request_id": "mp-1", "planned_time_s": 2420.2206625, "actual_time_s": 3139.844137289681}, {"request_id": "mp-2", "planned_time_s": 2891.35210858, "actual_time_s": 4077.5479837808857}, {"request_id": "mp-3", "planned_time_s": 3037.72642258, "actual_time_s": 4054.319545529099}, {"request_id": "mp-4", "planned_time_s": 2232.89490585, "actual_time_s": 2755.3506300877507}], "comparison": {"scenarios": ["edge_overload", "ev_feasible", "ev_infeasible", "large_batch", "mixed_priority"], "datasets_time": [{"label": "Multi-Agent System", "color": "#2a78d6", "data": [6653.7534422586, 1294.12660054, 2012.511563006, 22461.0315943836, 11801.7726326974]}, {"label": "Baseline (time-only)", "color": "#eb6834", "data": [6227.907352698001, 1214.234359314, 1798.1018379774, 20441.6871538676, 10444.0672486138]}, {"label": "Baseline (carbon-only)", "color": "#1baf7a", "data": [6518.713850964001, 1260.350803284, 2012.511563006, 23684.5160880768, 11273.859878875]}], "datasets_carbon": [{"label": "Multi-Agent System", "color": "#2a78d6", "data": [19.93439432226, 2.45382407188, 4.268176384199999, 54.642311540848006, 26.7769979800948]}, {"label": "Baseline (time-only)", "color": "#eb6834", "data": [21.07469694216, 2.79985158458, 4.8883695965000005, 55.258946440956606, 28.6955305644428]}, {"label": "Baseline (carbon-only)", "color": "#1baf7a", "data": [19.6647558819, 2.34579250196, 4.268176384199999, 53.865723989388, 24.4549281401148]}]}, "ink": {"primary": "#0b0b0b", "secondary": "#52514e", "muted": "#898781"}, "surface": {"chart": "#fcfcfb", "page": "#f9f9f7", "grid": "#e1e0d9", "border": "rgba(11,11,11,0.10)"}, "status": {"good": "#0ca30c", "critical": "#d03b3b"}};
+
+function isDark() {
+  const t = document.documentElement.getAttribute('data-theme');
+  if (t === 'dark') return true;
+  if (t === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+const dark = isDark();
+const ink = dark ? '#ffffff' : DATA.ink.primary;
+const inkSecondary = dark ? '#c3c2b7' : DATA.ink.secondary;
+const grid = dark ? '#2c2c2a' : DATA.surface.grid;
+
+Chart.defaults.font.family = "system-ui, -apple-system, 'Segoe UI', sans-serif";
+Chart.defaults.color = inkSecondary;
+Chart.defaults.borderColor = grid;
+
+// Stat cards
+const cardsEl = document.getElementById('cards');
+DATA.cards.forEach(c => {
+  const div = document.createElement('div');
+  div.className = 'card';
+  const valueClass = c.status ? `value ${c.status}` : 'value';
+  div.innerHTML = `<div class="label">${c.label}</div><div class="${valueClass}">${c.value}</div>`;
+  cardsEl.appendChild(div);
+});
+
+document.getElementById('narrative-text').textContent = DATA.summary_text;
+
+// Chart 1: per-route planned vs actual time
+new Chart(document.getElementById('routeTimeChart'), {
+  type: 'bar',
+  data: {
+    labels: DATA.per_route.map(r => r.request_id),
+    datasets: [
+      {
+        label: 'Planned (s)',
+        data: DATA.per_route.map(r => r.planned_time_s),
+        backgroundColor: '#2a78d6',
+        borderRadius: 4,
+        categoryPercentage: 0.7,
+        barPercentage: 0.9,
+      },
+      {
+        label: 'Actual, simulated (s)',
+        data: DATA.per_route.map(r => r.actual_time_s),
+        backgroundColor: '#eb6834',
+        borderRadius: 4,
+        categoryPercentage: 0.7,
+        barPercentage: 0.9,
+      },
+    ],
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { position: 'top', labels: { color: inkSecondary } } },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: inkSecondary } },
+      y: { grid: { color: grid }, ticks: { color: inkSecondary }, beginAtZero: true },
+    },
+  },
+});
+
+function systemComparisonChart(canvasId, datasets, yLabel) {
+  new Chart(document.getElementById(canvasId), {
+    type: 'bar',
+    data: {
+      labels: DATA.comparison.scenarios,
+      datasets: datasets.map(d => ({
+        label: d.label,
+        data: d.data,
+        backgroundColor: d.color,
+        borderRadius: 4,
+        categoryPercentage: 0.7,
+        barPercentage: 0.85,
+      })),
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'top', labels: { color: inkSecondary, boxWidth: 12 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: inkSecondary, maxRotation: 30, minRotation: 0 } },
+        y: { grid: { color: grid }, ticks: { color: inkSecondary }, beginAtZero: true, title: { display: true, text: yLabel, color: inkSecondary } },
+      },
+    },
+  });
+}
+
+systemComparisonChart('systemTimeChart', DATA.comparison.datasets_time, 'seconds');
+systemComparisonChart('systemCarbonChart', DATA.comparison.datasets_carbon, 'kg CO2');
+</script>
+</body>
+</html>
