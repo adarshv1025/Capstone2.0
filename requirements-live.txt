@@ -1,0 +1,12 @@
+# Extra dependencies for live_app.py (live GNN inference + interactive planner).
+# The agent layer alone only needs requirements.txt; install this on top:
+#   pip install -r requirements.txt
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu   # or a CUDA build
+#   pip install -r requirements-live.txt
+-r requirements.txt
+torch
+torch_geometric
+numpy
+streamlit
+folium
+streamlit-folium

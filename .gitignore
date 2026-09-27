@@ -4,3 +4,9 @@ __pycache__/
 .venv/
 venv/
 .env.*
+
+# Large data pulled from the team Drive (Capstone/GNN, Capstone/bengaluru_graph)
+gnn_checkpoints_v3/
+dataset_kaggle/
+bengaluru_graph/
+eval_run.log

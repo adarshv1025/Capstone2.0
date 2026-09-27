@@ -1008,3 +1008,43 @@ in — worth reading both stages, not just the ending:**
   that metric — though `mean_abs_time_deviation_pct` is roughly comparable
   across all three (0.355/0.339/0.349), a closer picture than `on_time_rate`
   alone suggests.
+## 5. Live interactive planner — `live_app.py`
+
+Streamlit upgrade of the static dashboard (4.3's "upgrade to a small
+Streamlit app" follow-up). User picks source/destination on a Leaflet map
+of Bengaluru (or one of the 13 named depots / BESCOM EV stations), a
+traffic snapshot (date/hour/weather/incident), a priority and a vehicle;
+"Plan route" runs **live GNN v3 inference** (~0.2-0.4s on CPU for all
+15,083 edges) and then `pipeline.run_full_pipeline()` for that one
+request (~8s on Groq), and shows the route vs. both baselines on the map,
+headline metrics, and every agent's decision/reasoning. A toggle turns off
+the LLM agents (solver-only, instant, no API tokens).
+
+Run: `pip install -r requirements-live.txt`, then `streamlit run live_app.py`.
+
+**Data it needs, not in git (from the team Drive, gitignored):**
+`gnn_checkpoints_v3/{best_model.pt,normalizer.pt}` (Drive `Capstone/GNN/gnn_checkpoints_v3/`),
+`dataset_kaggle/test/snapshot_*.pt` (381 files, ~690 MB, Drive `Capstone/GNN/dataset_kaggle/test/`),
+`bengaluru_graph/{nodes,edges}.geojson` (Drive `Capstone/bengaluru_graph/`).
+
+**Node coordinates — resolves 4.5's "no lat/lon anywhere" note:**
+`bengaluru_graph/nodes.geojson` feature *i* == GNN node index *i*, and
+`edges.geojson` feature order == `edge_index` / `sample_costs` row order
+(verified exactly), so edge geometry maps straight onto routes.
+
+**Two fixes made to get live inference running locally (don't reintroduce):**
+1. `gnn/gnn_inference.py` in git had lost its first 53 lines (module
+   docstring + all imports) and could not be imported. Restored from the
+   Drive copy; the rest of the file was byte-identical.
+2. `gnn_checkpoints_v3/*.pt` were saved on a Colab GPU, so `torch.load`
+   failed on CPU-only machines. `load_trained_model()` and
+   `FeatureNormalizer.load()` in `gnn_trainer_v3.py` now pass
+   `map_location="cpu"`; `GNNCostPredictor` still moves everything to CUDA
+   when available. Verified: live predictions match `sample_costs/*.csv`
+   to <=1.2e-4, R^2 ~0.95 on snapshot 07235.
+
+**Evaluation re-run (all 5 snapshots, 75/75 reliable):** results in
+`agents/evaluation_results/`. Mostly consistent with 4.5, one change worth
+noting: on `mixed_priority`, `multi_agent`'s `on_time_rate` came out 0.24
+(vs 0.40 in 4.5) and `baseline_carbon_only` led at 0.36 — the 4.5 claim
+that `multi_agent` wins `on_time_rate` there did not reproduce.

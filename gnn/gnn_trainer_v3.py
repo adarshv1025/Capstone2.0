@@ -146,7 +146,7 @@ class FeatureNormalizer:
 
     @classmethod
     def load(cls, path):
-        obj=cls(); ck=torch.load(path, weights_only=True)
+        obj=cls(); ck=torch.load(path, weights_only=True, map_location="cpu")
         obj.x_mean=ck["x_mean"]; obj.x_std=ck["x_std"]
         obj.ea_mean=ck["ea_mean"]; obj.ea_std=ck["ea_std"]
         obj.y_mean=ck["y_mean"];  obj.y_std=ck["y_std"]
@@ -496,7 +496,10 @@ def load_trained_model(checkpoint_dir="./gnn_checkpoints_v3"):
         carbon_kg     = pred_real[:, 2]   # kg CO₂
         ev_energy_pct = pred_real[:, 3]   # % of 50kWh battery consumed
     """
-    ck  = torch.load(f"{checkpoint_dir}/best_model.pt", weights_only=False)
+    # map_location="cpu": checkpoints saved on a Colab GPU must still load on
+    # CPU-only machines; GNNCostPredictor moves the model to CUDA afterwards
+    # if one is available.
+    ck  = torch.load(f"{checkpoint_dir}/best_model.pt", weights_only=False, map_location="cpu")
     cfg = ck["config"]
     model, _ = build_model(cfg["model_type"], **{k:cfg[k] for k in
                ["hidden","layers","heads","dropout"]})

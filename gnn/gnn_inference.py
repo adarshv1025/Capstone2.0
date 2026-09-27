@@ -1,3 +1,56 @@
+"""
+gnn_inference.py
+
+Single entry point for downstream consumers (the multi-agent routing
+layer) to get per-edge cost predictions from the trained LogisticsGNN,
+without needing to know anything about normalization or clamping.
+
+INPUT CONTRACT
+--------------
+A torch_geometric.data.Data snapshot with:
+    data.x          [num_nodes, 13] node features (RAW, unnormalized)
+    data.edge_index [2, num_edges]
+    data.edge_attr  [num_edges, 16] edge features (RAW, unnormalized)
+
+(data.y is not required/used for inference)
+
+OUTPUT CONTRACT
+---------------
+A pandas.DataFrame, one row per edge (same order as edge_index), columns:
+
+    src, dst
+        node indices for that edge
+
+    travel_time_s
+        seconds, >= 0
+
+    delay_probability
+        0-1
+
+    carbon_kg
+        kg CO2, >= 0
+
+    ev_energy_pct
+        % of a 50kWh battery, >= 0
+
+All 4 values are already real-unit and domain-clamped -- safe to use
+directly as edge costs, no further transformation needed.
+
+USAGE
+-----
+    from gnn_inference import GNNCostPredictor
+
+    predictor = GNNCostPredictor(checkpoint_dir="./gnn_checkpoints_v3")
+    costs_df = predictor.predict(snapshot)
+"""
+
+import torch
+import pandas as pd
+
+from gnn_trainer_v3 import load_trained_model
+from gnn_model_v3 import clamp_predictions
+
+
 class GNNCostPredictor:
     """
     Loads the trained model + normalizer once.
