@@ -37,7 +37,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "gnn"))
 from routing_solver import RoutingSolver  # noqa: E402
 
-from llm_client import chat_json
+from llm_client import align_ids, chat_json
 from route_agent import build_route_result
 from schemas import DeliveryRequest, RouteResult
 
@@ -54,7 +54,9 @@ If the current weights already heavily favor carbon, you may propose the
 same weights unchanged -- no forced change.
 
 Respond with ONLY this JSON object:
-    {"candidates": {"req-0": {"time": 0.2, "delay": 0.1, "carbon": 0.6, "ev": 0.1}}, "reasoning": "one sentence"}
+    {"candidates": {"<request_id>": {"time": 0.2, "delay": 0.1, "carbon": 0.6, "ev": 0.1}}, "reasoning": "one sentence"}
+where each "<request_id>" key is replaced by the exact request_id string
+from the input.
 """
 
 REFLECT_SYSTEM_PROMPT = """You are the Carbon-Aware Optimizer performing self-reflection on candidate
@@ -79,7 +81,9 @@ one. A candidate whose carbon_delta_kg is zero or positive (no real
 reduction) must always be rejected regardless of time_delta_s.
 
 Respond with ONLY this JSON object:
-    {"decisions": {"req-0": {"accept": true, "reasoning": "one sentence"}}}
+    {"decisions": {"<request_id>": {"accept": true, "reasoning": "one sentence"}}}
+where each "<request_id>" key is replaced by the exact request_id string
+from the input.
 """
 
 
@@ -127,13 +131,14 @@ class CarbonOptimizerAgent:
             ]
         }
         proposal = self._call(PROPOSE_SYSTEM_PROMPT, propose_payload)
-        candidate_weights = proposal.get("candidates", {})
+        candidate_weights = align_ids(proposal.get("candidates", {}), [r.request_id for r in candidates_pool])
         if not candidate_weights:
             return list(results_by_id.values()), []
 
         # GROUND: deterministically solve every candidate and compute deltas.
         candidate_results: dict[str, RouteResult] = {}
         deltas_by_id: dict[str, dict] = {}
+        audit_by_id: dict[str, dict] = {}
         for r in candidates_pool:
             weights = candidate_weights.get(r.request_id)
             if weights is None:
@@ -156,6 +161,15 @@ class CarbonOptimizerAgent:
                 "original_time_s": r.total_travel_time_s,
                 "original_carbon_kg": r.total_carbon_kg,
             }
+            # Kept out of the REFLECT payload (deltas_by_id is sent as-is),
+            # added to decisions_log below: lets a UI show what the Route
+            # Agent originally chose even after an accepted swap replaces
+            # that RouteResult (whose reasoning is None for candidates).
+            audit_by_id[r.request_id] = {
+                "original_weights": r.weights_used,
+                "original_reasoning": r.reasoning,
+                "candidate_weights": weights,
+            }
 
         if not deltas_by_id:
             return list(results_by_id.values()), []
@@ -163,7 +177,7 @@ class CarbonOptimizerAgent:
         # REFLECT: decide, per request, whether the ground-truth trade is
         # actually worth it.
         reflection = self._call(REFLECT_SYSTEM_PROMPT, {"candidates": list(deltas_by_id.values())})
-        decisions = reflection.get("decisions", {})
+        decisions = align_ids(reflection.get("decisions", {}), deltas_by_id.keys())
 
         decisions_log = []
         for rid, delta in deltas_by_id.items():
@@ -177,7 +191,7 @@ class CarbonOptimizerAgent:
             if accept:
                 results_by_id[rid] = candidate_results[rid]
 
-            decisions_log.append({**delta, "accepted": accept, "reasoning": decision.get("reasoning")})
+            decisions_log.append({**delta, **audit_by_id[rid], "accepted": accept, "reasoning": decision.get("reasoning")})
 
         return list(results_by_id.values()), decisions_log
 

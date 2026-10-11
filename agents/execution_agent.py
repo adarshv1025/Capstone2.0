@@ -54,7 +54,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "gnn"))
 
-from llm_client import chat_json
+from llm_client import align_ids, chat_json
 from schemas import RouteResult, Vehicle
 
 TIME_JITTER_PCT = 0.10               # +-10% baseline prediction noise per edge
@@ -77,7 +77,9 @@ a "greenest" or "balanced" one. A negative time_deviation_pct (finished
 early) should essentially never trigger a re-plan regardless of priority.
 
 Respond with ONLY this JSON object:
-    {"decisions": {"req-0": {"replan": true, "reasoning": "one sentence"}}}
+    {"decisions": {"<request_id>": {"replan": true, "reasoning": "one sentence"}}}
+where each "<request_id>" key is replaced by the exact request_id string
+from the input.
 """
 
 
@@ -176,7 +178,7 @@ class ExecutionAgent:
                 needs_reflection.append(report)
 
         if needs_reflection:
-            decisions = self._reflect(needs_reflection)
+            decisions = align_ids(self._reflect(needs_reflection), [r["request_id"] for r in needs_reflection])
             for report in needs_reflection:
                 decision = decisions.get(report["request_id"], {})
                 report["replan_triggered"] = bool(decision.get("replan", False))

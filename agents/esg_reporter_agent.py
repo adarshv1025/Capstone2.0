@@ -43,6 +43,10 @@ how far off (in either direction) each route's actual travel time was from
 its planned time -- treat it as the primary on-time-performance figure and
 `on_time_rate` as a secondary, coarser one (it can only take a few discrete
 values on a small batch, so don't over-read small differences in it).
+UNITS: despite its name, `mean_abs_time_deviation_pct` is a FRACTION, not
+a percent -- 0.43 means 43% (NOT 0.43%). `on_time_rate` and
+`ev_feasibility_rate` are fractions too (1.0 = 100%). Write all three as
+percentages, e.g. 0.43 -> "43%".
 
 Write a short sustainability summary (3-5 sentences) for a dashboard, aimed
 at a non-technical stakeholder. Highlight what's notable: strong

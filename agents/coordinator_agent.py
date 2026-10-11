@@ -38,7 +38,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "gnn"))
 from routing_solver import RoutingSolver  # noqa: E402
 
-from llm_client import chat_json
+from llm_client import align_ids, chat_json
 from route_agent import build_route_result
 from schemas import DeliveryRequest, RouteResult, Vehicle
 
@@ -58,7 +58,8 @@ fairness/negotiation call (e.g. weigh stated priority, how much extra cost
 rerouting likely costs each one, avoid rerouting the same request for every
 group it appears in if rerouting it once would clear several). Respond
 with ONLY this JSON object:
-    {"reroute_request_ids": ["req-2", "req-3"], "reasoning": "one sentence"}
+    {"reroute_request_ids": ["<request_id>", "<request_id>"], "reasoning": "one sentence"}
+using the exact request_id strings from the input.
 
 Conflict type "ev_range": the JSON's "violations" list has one entry per
 request whose route consumes more EV battery energy than its vehicle's
@@ -67,7 +68,9 @@ much the route overshoots the battery budget by). For EACH request_id,
 decide a new weights dict that shifts enough weight onto "ev" to fix
 feasibility, trading off against the other three as little as necessary.
 Respond with ONLY this JSON object:
-    {"weight_adjustments": {"req-2": {"time": 0.1, "delay": 0.1, "carbon": 0.2, "ev": 0.6}}, "reasoning": "one sentence"}
+    {"weight_adjustments": {"<request_id>": {"time": 0.1, "delay": 0.1, "carbon": 0.2, "ev": 0.6}}, "reasoning": "one sentence"}
+where each "<request_id>" key is replaced by the exact request_id string
+from the input.
 
 Always respond with ONLY the single JSON object for the conflict's type, no
 other text.
@@ -211,6 +214,11 @@ class CoordinatorAgent:
                     rid for request_ids in overloaded_edges.values() for rid in request_ids[self.edge_capacity:]
                 }
                 reroute_ids = decision.get("reroute_request_ids", list(fallback_reroute_ids))
+                # A non-empty reply naming none of the real ids (e.g. the
+                # prompt's example ids echoed back) is a malformed answer,
+                # not "reroute nobody" -- use the fallback instead.
+                if reroute_ids and not any(rid in results_by_id for rid in reroute_ids):
+                    reroute_ids = list(fallback_reroute_ids)
                 penalized_edges.update(overloaded_edges.keys())
 
                 for rid in reroute_ids:
@@ -243,7 +251,7 @@ class CoordinatorAgent:
                     ],
                 }
                 decision = self._negotiate(conflict)
-                weight_adjustments = decision.get("weight_adjustments", {})
+                weight_adjustments = align_ids(decision.get("weight_adjustments", {}), ev_violations)
 
                 for rid in ev_violations:
                     request = requests_by_id.get(rid)

@@ -61,21 +61,54 @@ def chat(messages: list[dict], model: str = None, max_retries: int = 5, retry_ba
             time.sleep(backoff * random.uniform(0.7, 1.3))
 
 
-def chat_json(messages: list[dict], model: str = None, **kwargs) -> dict:
+def align_ids(by_id, expected_ids) -> dict:
+    """
+    Best-effort repair for an LLM reply keyed by request_id when the model
+    used the wrong key. Found while preparing demo runs: gpt-oss-120b
+    sometimes copied the prompt's example id (e.g. "req-0") instead of the
+    real one ("live-0", "mp-3", ...) -- ~2 in 6 replies for a single-request
+    Carbon Optimizer reflection -- so the lookup missed and the agent
+    silently fell back to its default (reject / no re-plan).
+
+    Only remaps when it's unambiguous: exactly one requested id is missing
+    AND exactly one returned key is unknown. Otherwise returns the dict
+    unchanged (callers keep their existing conservative fallbacks).
+    """
+    if not isinstance(by_id, dict):
+        return {}
+    expected = list(expected_ids)
+    unknown = [k for k in by_id if k not in expected]
+    missing = [e for e in expected if e not in by_id]
+    if len(unknown) == 1 and len(missing) == 1:
+        return {**by_id, missing[0]: by_id[unknown[0]]}
+    return by_id
+
+
+def chat_json(messages: list[dict], model: str = None, max_parse_retries: int = 2, **kwargs) -> dict:
     """
     Completion where the model is expected to return a single JSON object.
     Strips markdown code fences if the model wraps its output in them.
     Raises ValueError (with the raw content attached) on parse failure so
     the caller can decide whether to retry or fall back to a default.
+
+    Re-asks up to `max_parse_retries` times on an empty/unparseable reply
+    before raising. Found while preparing demo runs: groq/openai/gpt-oss-120b
+    intermittently returns an empty or non-JSON reply (~3 of 10 single-request
+    pipeline runs), and callers' conservative fallbacks then silently turned
+    that into e.g. "no reflection response -- reject" on a Carbon Optimizer
+    candidate that saved 0.5kg for +1s. The same prompt re-asked parsed fine
+    4/4 times, so this is transient, not a prompt problem.
     """
-    content = chat(messages, model=model, **kwargs)
-    text = content.strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Model did not return valid JSON: {content!r}") from e
+    for attempt in range(max_parse_retries + 1):
+        content = chat(messages, model=model, **kwargs) or ""
+        text = content.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            if attempt == max_parse_retries:
+                raise ValueError(f"Model did not return valid JSON: {content!r}") from e
