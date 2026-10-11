@@ -22,9 +22,13 @@ and measurability, not just "something that runs."
 
 **Graph:** Bengaluru OSM road network filtered to motorway/trunk/primary/
 secondary/tertiary roads — 7,095 nodes, 15,083 edges. Dynamic (traffic-dependent)
-features come from a Kaggle Bengaluru traffic dataset covering 16 named roads
-(~60% of edges geo-matched directly; remaining ~40% filled by spatial
-interpolation from nearby matched edges).
+features come from a Kaggle Bengaluru traffic dataset covering 16 named roads.
+**Corrected 2026-10-11 (was "~60% geo-matched / ~40% interpolated", which is
+wrong — see 7.2):** only 481 of the 15,083 edges (3.2%; 13 of the 16 Kaggle
+roads) are name-matched to real Kaggle values; the other ~96.8% are filled by
+spatial interpolation from those matched edges. The Kaggle data is daily, so
+the 8 time-of-day snapshots per day come from a hand-set hourly multiplier
+table, not measured hourly traffic.
 
 ---
 
@@ -1048,3 +1052,171 @@ Run: `pip install -r requirements-live.txt`, then `streamlit run live_app.py`.
 noting: on `mixed_priority`, `multi_agent`'s `on_time_rate` came out 0.24
 (vs 0.40 in 4.5) and `baseline_carbon_only` led at 0.36 — the 4.5 claim
 that `multi_agent` wins `on_time_rate` there did not reproduce.
+
+## 6. Demo scenarios + four agent-layer fixes found while preparing them
+
+`live_app.py` has a "🎬 Demo scenario" picker (6 one-click cases, see
+`DEMO_SCENARIOS`), picked by scanning all 156 named-place pairs on real GNN
+predictions for trips where fastest/balanced/greenest genuinely diverge.
+Only ~3 pairs per snapshot give three distinct routes with a real
+time-vs-carbon trade-off (GNN carbon correlates strongly with time), so the
+scenarios reuse the best ones: Peenya WH -> Rajajinagar Hub (−26% CO2 for
+~20s at 09:00), HSR EV -> Rajajinagar, Whitefield -> Peenya.
+Time of day matters: 09:00/17:00 snapshots are ~27% slower network-wide
+than 21:00, with mean delay_probability 0.66 vs 0.33.
+
+The app no longer shows route-level `P(any delay)` (always ~100%: 1-prod(1-p)
+over 30-90 segments at p~0.5). It shows expected time with delays (exact:
+sum t*(1 + 0.65p), using the Execution agent's noise model) and the 90th
+percentile arrival time (2,000-sample Monte Carlo).
+
+Fixes (don't reintroduce):
+1. **Echoed example ids.** Prompts showed example keys like "req-0"; the
+   LLM copied them back instead of the real id ~2/6 times, the lookup
+   missed, and agents silently fell back (Carbon Optimizer: "no reflection
+   response -- reject", even for a −0.5kg/+1s candidate). Prompts now use a
+   `<request_id>` placeholder + "use the exact request_id"; code-side
+   `llm_client.align_ids()` remaps when exactly one id is missing and one
+   unknown key came back (Carbon Optimizer propose/reflect, Execution
+   reflect, Coordinator ev_range); Coordinator treats a non-empty
+   reroute list with no valid ids as malformed and uses its fallback.
+2. **Empty/invalid JSON replies.** `chat_json()` re-asks up to 2 times
+   before raising ValueError (gpt-oss-120b intermittently returns empty
+   content).
+3. **ESG narrative units.** `mean_abs_time_deviation_pct` is a fraction
+   (0.43 = 43%); the narrate prompt didn't say so and the LLM wrote
+   "0.43%". Prompt now states units for it, `on_time_rate`,
+   `ev_feasibility_rate`. Stored metric values unchanged.
+4. **Swap audit trail.** An accepted Carbon Optimizer swap replaces the
+   RouteResult (reasoning None). `decisions_log` entries now also carry
+   `original_weights`, `original_reasoning`, `candidate_weights` (additive;
+   ESG aggregate only reads `accepted`/`carbon_delta_kg`).
+
+Fixes 1-2 can change evaluation outcomes (fewer silent default rejects).
+The evaluation was re-run on the fixed code on 2026-10-11 — see 7.3;
+`evaluation_results/` and `dashboard.html` now reflect that run.
+
+## 7. Measured audit — 2026-10-11
+
+Every runnable component was executed and each item of the proposed
+architecture (Review 1 high-level design, objectives and roadmap) scored
+working (1) / partial (0.5) / absent (0). **9 architecture stages: 39/65 =
+60%. Including cross-cutting promises: 46/83 = 55%.** Scope decision
+(Aayan, 2026-10-07): the team continues only with this repo's six agents,
+not the Fleet/Trust/EV/ESG agents shown in the Review 1 deck.
+
+### 7.1 What was run
+
+| Check | Result |
+|---|---|
+| GNN v3 on all 381 test snapshots (5,746,623 edge rows) | R^2 0.9488 / 0.9687 / 0.9431 / 0.9445 (TT / delay / carbon / EV) — matches the training report to 4 decimals; 156 ms median per snapshot on CPU |
+| Each agent's `__main__` smoke test + `pipeline.py` | 7/7 exit 0, no tracebacks, no silent fallbacks |
+| Full evaluation, 5 scenarios x 3 systems x 5 snapshots | 75/75 reliable, 0 routing failures |
+| `live_app.py`, 6 demo scenarios, LLM off and on (Streamlit AppTest) | 54/54 checks pass |
+| `dashboard.py` | regenerated from the new summary |
+
+Not re-run: GNN training (needs the 6,092 train snapshots + GPU; verified
+via `training_log.json`, best epoch 11 of 19, and the reproduced test
+metrics) and the Drive data-building scripts (code read, outputs verified).
+
+### 7.2 Data-layer facts (don't restate the old claims)
+
+- **Real-data coverage is 3.2%, not ~60%.** `match_report.csv` sums to 519
+  name matches = 481 unique edges (3.82% of road length); CMH Road, Sony
+  World Junction and Yeshwanthpur Circle match nothing. Reproduced locally
+  from `edges.geojson` road names with the script's own keyword map.
+- **Hourly variation is synthetic.** `kaggle_to_snapshots.py` scales each
+  day's Kaggle value by `HOUR_MULTIPLIERS` (e.g. 09:00 x1.45, 21:00 x0.45)
+  plus N(0, 0.03) noise. 952 dates x 8 hours = 7,616 snapshots.
+- **Node "logistics" features are simulated** with `np.random` (20 random
+  vehicles per snapshot, pending orders, charger availability) and are
+  non-zero on <=0.3% of nodes.
+- **Little weather/incident signal:** 7,336 of 7,616 snapshots are "Clear";
+  `weather_impact` takes 2 values in the test split (0 / 0.15);
+  `has_incident` is True for 7,608 of 7,616.
+- **Truly dynamic edge features:** `congestion_index`, `weather_impact`,
+  `event_disruption` (non-zero on 1.5% of edges), `road_condition_score`.
+  The other 12 are static (graph topology is identical in every snapshot).
+- **Labels are near-deterministic functions of the edge's own features:**
+  formula-vs-label R^2 = 1.0000 (EV energy), 0.998 (carbon), 0.994 (travel
+  time), 0.79 (delay).
+- **Non-graph baselines** (trained on 60 test snapshots, scored on the other
+  321): Ridge 0.981 / 0.800 / 0.993 / 0.994, GBM 0.993 / 0.900 / 0.993 /
+  0.995, vs GNN 0.949 / 0.970 / 0.943 / 0.945. The GNN wins only on
+  `delay_probability`.
+- Test split = 48 dates, 2024-06-23 .. 2024-08-09. The 5 `sample_costs`
+  snapshots used by the evaluation are all from 2024-06-23 (13:00-21:00).
+
+### 7.3 Evaluation on the fixed code (mean of 5 snapshots)
+
+| scenario | system | time_s | carbon_kg | mean_abs_dev | on_time | ev_feas |
+|---|---|---|---|---|---|---|
+| edge_overload | multi_agent | 6935 | 20.28 | 0.279 | 0.00 | n/a |
+| edge_overload | baseline_time_only | 6228 | 21.07 | 0.290 | 0.27 | n/a |
+| edge_overload | baseline_carbon_only | 6519 | 19.66 | 0.308 | 0.07 | n/a |
+| ev_feasible | multi_agent | 1273 | 2.43 | 0.401 | 0.00 | 0.20 |
+| ev_feasible | baseline_time_only | 1214 | 2.80 | 0.406 | 0.00 | 0.20 |
+| ev_feasible | baseline_carbon_only | 1260 | 2.35 | 0.483 | 0.00 | 0.60 |
+| ev_infeasible | multi_agent | 1887 | 4.43 | 0.307 | 0.00 | 0.00 |
+| ev_infeasible | baseline_time_only | 1798 | 4.89 | 0.329 | 0.00 | 0.00 |
+| ev_infeasible | baseline_carbon_only | 2013 | 4.27 | 0.360 | 0.00 | 0.00 |
+| large_batch | multi_agent | 22271 | 54.48 | 0.341 | 0.35 | 1.00 |
+| large_batch | baseline_time_only | 20442 | 55.26 | 0.352 | 0.38 | 1.00 |
+| large_batch | baseline_carbon_only | 23685 | 53.87 | 0.357 | 0.42 | 1.00 |
+| mixed_priority | multi_agent | 11822 | 26.67 | 0.370 | 0.16 | 1.00 |
+| mixed_priority | baseline_time_only | 10444 | 28.70 | 0.339 | 0.20 | 1.00 |
+| mixed_priority | baseline_carbon_only | 11274 | 24.45 | 0.349 | 0.36 | 1.00 |
+
+Reading these honestly:
+- Totals over the 5 scenarios: `multi_agent` is -3.9% carbon / +10.1% time
+  vs `baseline_time_only`, and +3.5% carbon / -1.3% time vs
+  `baseline_carbon_only`.
+- `baseline_carbon_only` is both faster AND greener than `multi_agent` in 3
+  of 5 scenarios (edge_overload, ev_feasible, mixed_priority).
+- `on_time_rate` is noisy: `baseline_time_only` on edge_overload moved 0.07
+  -> 0.27 between two runs with identical routes and seed, because the
+  Execution agent's LLM judges lateness differently run to run. Don't draw
+  conclusions from small on-time differences until the LLM is pinned
+  (temperature 0).
+- One snapshot evaluation costs ~42k Groq tokens; 5 snapshots ~ one free
+  account's daily cap (run was split across two accounts).
+
+### 7.4 Routing timings and the promised "Tsinghua SSSP" solver
+
+The team told the review panel a newer shortest-path algorithm (the
+"Tsinghua SSSP" algorithm, asymptotically faster than Dijkstra on sparse
+graphs) would replace Dijkstra. **Status: not implemented** — the code uses
+`nx.shortest_path` / `nx.single_source_dijkstra_path_length` only.
+
+Measured on an idle machine, 60 random origin-destination pairs:
+point-to-point Dijkstra 5.9 ms; single-source to all nodes 22.5 ms;
+`RoutingSolver.build_graph()` 378 ms; `find_route()` end to end 587 ms; one
+LLM plan 8-36 s. The search itself is ~1% of a routing call, so a faster
+SSSP cannot visibly speed anything up at this size (7,095 nodes); caching
+the graph can. Plan: implement it as a second, selectable solver, verify
+identical distances to Dijkstra, benchmark on this graph and on larger
+ones, and report the result as measured.
+
+### 7.5 Known defects found (not yet fixed)
+
+- `build_graph()` uses `nx.DiGraph`, so the 83 parallel edges (166 rows
+  sharing a (src, dst)) collapse to whichever row comes last: 15,000 of
+  15,083 edges are routable.
+- The graph is rebuilt on every `find_route()` call (see 7.4).
+- The `delay` objective sums per-edge probabilities, which rewards fewer
+  segments rather than less delay time; a high delay weight gave slower
+  routes that were more likely to run late.
+- Planning uses delay-free `travel_time_s`, so at rush hour nearly every
+  route runs 30-45% over plan in the Execution simulation.
+- `deadline_s` is never read; `is_ev` only affects the battery check, not
+  carbon; nothing acts on `replan_triggered`.
+- Absent from the code: distributed runtime, Neo4j, OR-Tools, LangGraph,
+  live data APIs, a retraining/feedback loop, a pytest suite.
+- Dashboard card label "Total planned distance-time" shows seconds only.
+
+### 7.6 Per-stage scores
+
+Data sources 6/9 · Ingestion 1/5 · Feature engineering 4.5/5 · Graph
+construction 3.5/5 · GNN 4/6 · Agent decisions 6/10 · Carbon optimisation
+4/7 · Execution and feedback 3/7 · ESG dashboard 7/11 · Distributed
+computing 0.5/3 · Evaluation 4/7 · Tests and CI 1.5/4 · Documentation 1/4.
