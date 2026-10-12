@@ -300,4 +300,4 @@ Review 3 package, then the paper work.
 | `e43855f` | 11 Oct | Agent reliability fixes, demo scenarios, delay figures. |
 | `0a83696` | 11 Oct | README, measured audit, evaluation re-run on fixed agents. |
 | `00b0cf3` | 12 Oct | Phase 2 code: routing fixes, expected-value planning, EV range fix, repeatable and logged LLM calls. |
-| next commit after `00b0cf3` | 12 Oct | Evaluation re-run, regenerated dashboard, `CHANGELOG.md`, updated `README.md` and `CLAUDE.md`. |
+| `fdb8497` | 12 Oct | Evaluation re-run, regenerated dashboard, `CHANGELOG.md`, updated `README.md` and `CLAUDE.md`. |
