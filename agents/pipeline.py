@@ -308,7 +308,7 @@ if __name__ == "__main__":
     for rep in execution_reports:
         flag = "REPLAN" if rep["replan_triggered"] else "ok"
         print(
-            f"  {rep['request_id']} [{flag}] planned={rep['planned_time_s']:.1f}s "
+            f"  {rep['request_id']} [{flag}] expected={rep['expected_time_s']:.1f}s "
             f"actual={rep['actual_time_s']:.1f}s (dev={rep['time_deviation_pct']:+.1%}) "
             f"delayed_edges={rep['num_delayed_edges']}/{rep['num_edges']}"
         )

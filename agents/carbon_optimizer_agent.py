@@ -153,12 +153,15 @@ class CarbonOptimizerAgent:
             if not solver_result["success"]:
                 continue
             candidate_results[r.request_id] = build_route_result(request, solver_result, weights, None)
+            original_time_s = r.expected_travel_time_s or r.total_travel_time_s
             deltas_by_id[r.request_id] = {
                 "request_id": r.request_id,
                 "priority": r.priority,
-                "time_delta_s": solver_result["total_travel_time_s"] - r.total_travel_time_s,
+                # Times here are EXPECTED times (delays included), the same
+                # quantity the solver's "time" objective optimises.
+                "time_delta_s": solver_result["expected_travel_time_s"] - original_time_s,
                 "carbon_delta_kg": solver_result["total_carbon_kg"] - r.total_carbon_kg,
-                "original_time_s": r.total_travel_time_s,
+                "original_time_s": original_time_s,
                 "original_carbon_kg": r.total_carbon_kg,
             }
             # Kept out of the REFLECT payload (deltas_by_id is sent as-is),

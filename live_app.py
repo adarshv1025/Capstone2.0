@@ -42,7 +42,7 @@ import torch  # noqa: E402
 from streamlit_folium import st_folium  # noqa: E402
 
 from gnn_inference import GNNCostPredictor  # noqa: E402
-from routing_solver import RoutingSolver  # noqa: E402
+from routing_solver import DELAY_EXTRA_TIME_RANGE, RoutingSolver, canonical_edges  # noqa: E402
 from schemas import DeliveryRequest, Vehicle  # noqa: E402
 
 CHECKPOINT_DIR = ROOT / "gnn_checkpoints_v3"
@@ -73,47 +73,49 @@ BASELINE_WEIGHTS = {
 # per-segment delay probabilities into numbers a user can act on. The route-
 # level "P(at least one delayed segment)" is ~100% on every route (50-90
 # segments at p~0.5 each), so it is not shown.
-TIME_JITTER_PCT = 0.10
-DELAY_EXTRA_TIME_RANGE = (1.3, 2.0)
+TIME_JITTER_PCT = 0.10  # mirrors agents/execution_agent.py; DELAY_EXTRA_TIME_RANGE comes from routing_solver
 
-# One-click demo cases, chosen by scanning all 156 named-place pairs on real
-# GNN predictions for routes where priorities genuinely diverge. Node ids are
-# GNN node indices; snapshots are dataset_kaggle/test file stems.
+# One-click demo cases. Node ids are GNN node indices; snapshots are
+# dataset_kaggle/test file stems. Numbers in the talking points were
+# re-measured on 2026-10-11 after the routing fixes (CLAUDE.md 9) with the
+# solver-only presets; "expected" means expected time including delays.
 DEMO_SCENARIOS = {
     "① Greener vs faster — Peenya → Rajajinagar, 9 AM": dict(
         src=5562, dst=1216, snapshot="snapshot_07241", priority="fastest", custom="", ev=True, battery=20.0, seed=0,
-        talk="Switch Priority between fastest → balanced → greenest and re-plan each time. Three different roads: "
-             "~17.2 / 17.4 / 17.5 min and ~2.90 / 2.64 / 2.15 kg CO₂ — the greenest route cuts ~26% CO₂ for "
-             "~20 s. With the LLM on, watch the Carbon Optimizer propose and accept a greener swap for 'fastest'."),
-    "② Cross-city trip — HSR Layout EV station → Rajajinagar, 9 AM": dict(
+        talk="Plan with Priority = fastest, then greenest. Two different roads: fastest is 9.7 km, ~22.2 min "
+             "expected, 2.95 kg CO₂; greenest is 7.0 km, ~25.2 min, 2.15 kg — 27% less CO₂ for about 3 minutes. "
+             "With the LLM on and 'fastest', watch the Carbon Optimizer weigh that same trade (+3 min for "
+             "−0.8 kg) and explain why it accepts or rejects it."),
+    "② A green swap that isn't worth it — HSR Layout → Rajajinagar, 9 AM": dict(
         src=3133, dst=1216, snapshot="snapshot_07241", priority="fastest", custom="", ev=True, battery=20.0, seed=0,
-        talk="18 km across the city. fastest ~36.2 min / 5.85 kg vs greenest ~36.6 min / 5.30 kg (−9% CO₂ for "
-             "~25 s). The map shows the two routes taking different corridors."),
-    "③ Agents repair a bad plan — Whitefield → Peenya, balanced, 9 AM": dict(
-        src=1904, dst=5562, snapshot="snapshot_07241", priority="balanced", custom="", ev=True, battery=20.0, seed=0,
-        talk="Run once WITHOUT the LLM: equal weights give a poor route (~86 min, ~12.1 kg). Then turn the LLM ON: "
-             "the Carbon Optimizer proposes a greener candidate that turns out faster AND cleaner (~70 min, "
-             "~10.3 kg) and accepts it."),
+        talk="17 km across the city. Fastest: ~45.4 min expected, 5.28 kg. Greenest: ~51.3 min, 5.11 kg — only 3% "
+             "less CO₂ for 6 more minutes. Good case for showing that the system does not chase carbon blindly: "
+             "compare the two priorities, and with the LLM on see how the Carbon Optimizer judges a small saving."),
+    "③ Three priorities, three routes — Whitefield → Peenya, 9 AM": dict(
+        src=1904, dst=5562, snapshot="snapshot_07241", priority="fastest", custom="", ev=True, battery=20.0, seed=0,
+        talk="The longest trip (about 32 km). Switch Priority through fastest → balanced → greenest: three "
+             "different routes with a steady trade-off — ~92.7 / 93.6 / 98.9 min expected and 10.08 / 9.83 / "
+             "9.67 kg CO₂. Balanced gets most of the carbon saving for under a minute."),
     "④ Plain-English priority (LLM only) — Peenya → Rajajinagar, 9 AM": dict(
         src=5562, dst=1216, snapshot="snapshot_07241", priority="balanced",
-        custom="Eco-friendly delivery, the customer is happy to wait a little longer",
+        custom="Urgent medicine delivery, must arrive as fast as possible",
         ev=True, battery=20.0, seed=0,
-        talk="Solver-only mode cannot read free text and falls back to equal 'balanced' weights (2.64 kg). With "
-             "the LLM on, the Route Agent turns the sentence into carbon-heavy weights (carbon ~0.4, EV ~0.3-0.4) "
-             "and explains why. The exact weights vary run to run, so the route lands on either the greenest "
-             "road (~2.15 kg) or the balanced one (~2.64 kg) — point at the weights and reasoning in ①. Try your "
-             "own sentence too, e.g. 'Urgent medicine, must arrive ASAP'."),
+        talk="Solver-only mode cannot read free text, so it falls back to equal 'balanced' weights and takes the "
+             "slower, greener road (~25.2 min expected, 2.15 kg). With the LLM on, the Route Agent turns the "
+             "sentence into time-heavy weights, explains why, and takes the fast road (~22.2 min, 2.95 kg). The "
+             "exact weights vary a little run to run. Try your own sentence too."),
     "⑤ EV battery too small — Whitefield → Peenya, 6 kWh, 9 AM": dict(
         src=1904, dst=5562, snapshot="snapshot_07241", priority="fastest", custom="", ev=True, battery=6.0, seed=0,
-        talk="The trip needs ~10-11 kWh. With the LLM on, the Coordinator detects the EV-range violation and "
-             "negotiates for 3 rounds (pushing the 'ev' weight up), cuts energy use but cannot fit 6 kWh — it "
-             "honestly reports 'not fully resolved'. Execution's hard rule then forces a re-plan. Set the battery "
-             "to 20 kWh to show the feasible case."),
+        talk="The trip is expected to need about 13.7 kWh once typical delays are included (about 10 kWh "
+             "delay-free). With the LLM on, the Coordinator detects the EV-range violation and negotiates for "
+             "3 rounds (pushing the 'ev' weight up), but no route fits 6 kWh — it honestly reports 'not fully "
+             "resolved'. Execution's hard rule then forces a re-plan. Set the battery to 20 kWh to show the "
+             "feasible case."),
     "⑥ Same trip at 9 PM — Peenya → Rajajinagar, light traffic": dict(
-        src=5562, dst=1216, snapshot="snapshot_07247", priority="greenest", custom="", ev=True, battery=20.0, seed=3,
-        talk="Same trip as ①, but on the 21:00 snapshot: the GNN predicts ~13-14 min instead of ~17 (half the "
-             "delay risk). The simulated drive runs only ~9-14% over plan, under the 15% threshold, so the "
-             "Execution agent accepts it as normal variance — no LLM review, no re-plan (compare with ①)."),
+        src=5562, dst=1216, snapshot="snapshot_07247", priority="fastest", custom="", ev=True, battery=20.0, seed=0,
+        talk="Same trip as ①, but on the 21:00 snapshot: ~15.6 min expected instead of ~22.2 at 9 AM, because the "
+             "GNN predicts far less delay at night. In both, the simulated drive lands within a few percent of "
+             "the expected time, so the Execution agent has no reason to re-plan."),
 }
 
 
@@ -143,15 +145,12 @@ def load_graph():
         "category": [f["properties"]["node_category"] for f in nodes],
     })
 
-    edge_geom, edge_len, edge_name = {}, {}, {}
-    for f in edges:
-        p = f["properties"]
-        key = (osm_to_idx[p["u"]], osm_to_idx[p["v"]])
-        # (lat, lon) order for folium
-        edge_geom[key] = [(lat, lon) for lon, lat in f["geometry"]["coordinates"]]
-        edge_len[key] = p.get("length") or 0.0
-        edge_name[key] = p.get("road_name") or ""
-    return nodes_df, edge_geom, edge_len, edge_name
+    # Indexed by row (== costs_df row == edges.geojson feature), not by
+    # (u, v): 83 junction pairs are joined by two parallel roads, and which
+    # one a route uses is decided per snapshot by canonical_edges().
+    edge_geom = [[(lat, lon) for lon, lat in f["geometry"]["coordinates"]] for f in edges]  # (lat, lon) for folium
+    edge_len = [f["properties"].get("length") or 0.0 for f in edges]
+    return nodes_df, edge_geom, edge_len
 
 
 @st.cache_data(show_spinner="Indexing traffic snapshots (first run only)...")
@@ -198,8 +197,8 @@ def node_label(nodes_df, idx) -> str:
     return f"{name} ({row.lat:.4f}, {row.lon:.4f})"
 
 
-def route_distance_km(path, edge_len) -> float:
-    return sum(edge_len.get((u, v), 0.0) for u, v in zip(path[:-1], path[1:])) / 1000.0
+def route_distance_km(rows, edge_len) -> float:
+    return sum(edge_len[r] for r in rows) / 1000.0
 
 
 def delay_outlook(path, edge_tp, n_samples=2000) -> tuple[float, float]:
@@ -223,10 +222,12 @@ def delay_outlook(path, edge_tp, n_samples=2000) -> tuple[float, float]:
     return expected, p90
 
 
-def route_summary(path, total_time_s, total_carbon_kg, total_ev_pct, edge_len, edge_tp) -> dict:
+def route_summary(path, rows, total_time_s, total_carbon_kg, total_ev_pct, edge_len, edge_tp) -> dict:
+    """rows: the costs_df / edges.geojson row of each edge along the path."""
     expected_s, p90_s = delay_outlook(path, edge_tp)
     return {
-        "distance_km": route_distance_km(path, edge_len),
+        "rows": rows,
+        "distance_km": route_distance_km(rows, edge_len),
         "time_min": total_time_s / 60.0,
         "expected_min": expected_s / 60.0,
         "p90_min": p90_s / 60.0,
@@ -236,12 +237,11 @@ def route_summary(path, total_time_s, total_carbon_kg, total_ev_pct, edge_len, e
     }
 
 
-def draw_route(fmap, path, edge_geom, color, label, weight=6, dash=None, opacity=0.9):
+def draw_route(fmap, rows, edge_geom, color, label, weight=6, dash=None, opacity=0.9):
     coords = []
-    for u, v in zip(path[:-1], path[1:]):
-        seg = edge_geom.get((u, v))
-        if seg:
-            coords.extend(seg if not coords else seg[1:])
+    for r in rows:
+        seg = edge_geom[r]
+        coords.extend(seg if not coords else seg[1:])
     if coords:
         folium.PolyLine(coords, color=color, weight=weight, opacity=opacity,
                         dash_array=dash, tooltip=label).add_to(fmap)
@@ -267,11 +267,11 @@ def build_map(nodes_df, edge_geom, src, dst, plan):
         for key in ("baseline_time_only", "baseline_carbon_only"):
             r = plan["routes"].get(key)
             if r and r["path"]:
-                bounds += draw_route(fmap, r["path"], edge_geom, COLORS[key], LABELS[key],
+                bounds += draw_route(fmap, r["rows"], edge_geom, COLORS[key], LABELS[key],
                                      weight=4, dash="6 8", opacity=0.75)
         r = plan["routes"].get("multi_agent")
         if r and r["path"]:
-            bounds += draw_route(fmap, r["path"], edge_geom, COLORS["multi_agent"],
+            bounds += draw_route(fmap, r["rows"], edge_geom, COLORS["multi_agent"],
                                  LABELS["multi_agent"], weight=7)
 
     for idx, color, label in ((src, "green", "Source"), (dst, "red", "Destination")):
@@ -293,18 +293,26 @@ def build_map(nodes_df, edge_geom, src, dst, plan):
 
 def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use_agents, edge_len, seed):
     solver = RoutingSolver(costs_df)
-    edge_tp = dict(zip(zip(costs_df["src"], costs_df["dst"]),
-                       zip(costs_df["travel_time_s"], costs_df["delay_probability"])))
+    # Same choice among parallel roads as the solver and the Execution agent.
+    ce = canonical_edges(costs_df)
+    uv = list(zip(ce["src"].tolist(), ce["dst"].tolist()))
+    row_of = dict(zip(uv, ce.index.tolist()))
+    edge_tp = dict(zip(uv, zip(ce["travel_time_s"].tolist(), ce["delay_probability"].tolist())))
     routes, trace = {}, {}
+
+    def summarize(path, total_time_s, total_carbon_kg, total_ev_pct):
+        # total_ev_pct: pass the EXPECTED EV energy (delays included), the
+        # figure the Coordinator plans range on.
+        rows = [row_of[(u, v)] for u, v in zip(path[:-1], path[1:])]
+        return {"path": path, **route_summary(path, rows, total_time_s, total_carbon_kg, total_ev_pct,
+                                              edge_len, edge_tp)}
 
     # Baselines: the same plain-solver calls evaluation_harness.run_baseline uses.
     for key, weights in BASELINE_WEIGHTS.items():
         r = solver.find_route(src, dst, weights=weights)
         if not r["success"]:
             return {"error": r["reason"]}
-        routes[key] = {"path": r["path"], **route_summary(
-            r["path"], r["total_travel_time_s"], r["total_carbon_kg"],
-            r["total_ev_energy_pct"], edge_len, edge_tp)}
+        routes[key] = summarize(r["path"], r["total_travel_time_s"], r["total_carbon_kg"], r["expected_ev_energy_pct"])
 
     if use_agents:
         from pipeline import run_full_pipeline  # imports litellm; only needed in this mode
@@ -323,9 +331,8 @@ def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use
         res = out["results"][0]
         if not res.success:
             return {"error": f"Route Agent failed: {res.reason}"}
-        routes["multi_agent"] = {"path": res.path, **route_summary(
-            res.path, res.total_travel_time_s, res.total_carbon_kg,
-            res.total_ev_energy_pct, edge_len, edge_tp)}
+        routes["multi_agent"] = summarize(res.path, res.total_travel_time_s, res.total_carbon_kg,
+                                          res.expected_ev_energy_pct)
         # If the Carbon Optimizer swapped the route, res carries the
         # candidate's weights and no reasoning -- show the Route Agent's own
         # choice from the optimizer's audit fields instead.
@@ -348,9 +355,8 @@ def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use
         }
         weights = presets.get(priority, {"time": 0.25, "delay": 0.25, "carbon": 0.25, "ev": 0.25})
         r = solver.find_route(src, dst, weights=weights)
-        routes["multi_agent"] = {"path": r["path"], **route_summary(
-            r["path"], r["total_travel_time_s"], r["total_carbon_kg"],
-            r["total_ev_energy_pct"], edge_len, edge_tp)}
+        routes["multi_agent"] = summarize(r["path"], r["total_travel_time_s"], r["total_carbon_kg"],
+                                          r["expected_ev_energy_pct"])
         trace["weights"] = weights
         trace["reasoning"] = "Solver-only mode: fixed preset weights, no LLM agents were called."
         if priority not in presets and priority != "balanced":
@@ -374,7 +380,7 @@ if missing or not glob.glob(str(SNAPSHOT_DIR / "snapshot_*.pt")):
     st.error("Missing data files: " + ", ".join(str(m) for m in missing or [SNAPSHOT_DIR]))
     st.stop()
 
-nodes_df, edge_geom, edge_len, edge_name = load_graph()
+nodes_df, edge_geom, edge_len = load_graph()
 snap_df = load_snapshot_index()
 named = nodes_df[nodes_df["name"] != ""].sort_values("name")
 named_options = {row["name"]: idx for idx, row in named.iterrows()}
@@ -526,13 +532,15 @@ m[2].metric("Expected with delays", f"{ma['expected_min']:.1f} min",
 m[3].metric("90% arrive within", f"{ma['p90_min']:.1f} min",
             help="90th percentile of 2,000 simulated drives — a safe time to promise.")
 m[4].metric("CO₂", f"{ma['carbon_kg']:.2f} kg")
-m[5].metric("EV energy", f"{ma['ev_kwh']:.2f} kWh")
+m[5].metric("EV energy", f"{ma['ev_kwh']:.2f} kWh",
+            help="Expected battery use including typical delays.")
 
 if plan["is_ev"]:
     ok = ma["ev_kwh"] <= plan["battery_kwh"]
     (st.success if ok else st.error)(
-        f"Planned EV energy {ma['ev_kwh']:.2f} kWh vs battery {plan['battery_kwh']:.1f} kWh — "
-        + ("feasible on plan." if ok else "exceeds the battery even before simulated delays."))
+        f"Expected EV energy {ma['ev_kwh']:.2f} kWh (typical delays included) vs battery "
+        f"{plan['battery_kwh']:.1f} kWh — "
+        + ("within the battery." if ok else "more than the battery holds."))
 
 # ---- Comparison vs baselines ----------------------------------------------
 st.subheader("Compared with single-objective baselines")
@@ -592,7 +600,7 @@ if plan["use_agents"]:
         if trace["optimizer"]:
             for d in trace["optimizer"]:
                 verdict = "✅ accepted" if d["accepted"] else "❌ rejected"
-                st.markdown(f"{verdict} — Δtime **{d['time_delta_s']:+.0f} s**, "
+                st.markdown(f"{verdict} — Δ expected time **{d['time_delta_s']:+.0f} s**, "
                             f"ΔCO₂ **{d['carbon_delta_kg']:+.3f} kg**")
                 st.caption(d.get("reasoning") or "")
         else:
@@ -600,7 +608,8 @@ if plan["use_agents"]:
     with st.expander("④ Execution — simulated drive with noise", expanded=True):
         for rep in trace["execution"]:
             e1, e2, e3, e4 = st.columns(4)
-            e1.metric("Planned", f"{rep['planned_time_s'] / 60:.1f} min")
+            e1.metric("Expected (with delays)", f"{rep['expected_time_s'] / 60:.1f} min",
+                      help="What the plan promised: the GNN's time plus typical delays.")
             e2.metric("Simulated actual", f"{rep['actual_time_s'] / 60:.1f} min",
                       f"{rep['time_deviation_pct']:+.0%}", delta_color="inverse")
             e3.metric("Delayed segments", f"{rep['num_delayed_edges']}/{rep['num_edges']}")

@@ -85,6 +85,7 @@ def build_dashboard_html(costs_df: pd.DataFrame, comparison_df: pd.DataFrame, mo
         {
             "request_id": rid,
             "planned_time_s": rep["planned_time_s"],
+            "expected_time_s": rep["expected_time_s"],
             "actual_time_s": rep["actual_time_s"],
         }
         for rid, rep in reports_by_id.items()
@@ -127,9 +128,11 @@ def build_dashboard_html(costs_df: pd.DataFrame, comparison_df: pd.DataFrame, mo
     }
 
     cards = [
-        {"label": "Total planned distance-time", "value": _fmt(metrics["total_planned_time_s"], " s", 0)},
+        {"label": "Total planned time (no delays)", "value": _fmt(metrics["total_planned_time_s"], " s", 0)},
+        {"label": "Total expected time (typical delays)", "value": _fmt(metrics["total_expected_time_s"], " s", 0)},
         {"label": "Total actual (simulated) time", "value": _fmt(metrics["total_actual_time_s"], " s", 0)},
-        {"label": "Total planned carbon", "value": _fmt(metrics["total_planned_carbon_kg"], " kg")},
+        {"label": "Total planned carbon (no delays)", "value": _fmt(metrics["total_planned_carbon_kg"], " kg")},
+        {"label": "Total expected carbon (typical delays)", "value": _fmt(metrics["total_expected_carbon_kg"], " kg")},
         {"label": "Total actual (simulated) carbon", "value": _fmt(metrics["total_actual_carbon_kg"], " kg")},
         {"label": "Mean abs. time deviation", "value": _fmt((metrics["mean_abs_time_deviation_pct"] or 0) * 100, "%")},
         {
@@ -262,7 +265,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   </div>
 
   <div class="panel">
-    <h2>Planned vs. simulated-actual time per route (mixed_priority scenario)</h2>
+    <h2>Expected vs. simulated-actual time per route (mixed_priority scenario)</h2>
     <canvas id="routeTimeChart"></canvas>
   </div>
 
@@ -308,15 +311,15 @@ DATA.cards.forEach(c => {
 
 document.getElementById('narrative-text').textContent = DATA.summary_text;
 
-// Chart 1: per-route planned vs actual time
+// Chart 1: per-route expected (plan incl. typical delays) vs actual time
 new Chart(document.getElementById('routeTimeChart'), {
   type: 'bar',
   data: {
     labels: DATA.per_route.map(r => r.request_id),
     datasets: [
       {
-        label: 'Planned (s)',
-        data: DATA.per_route.map(r => r.planned_time_s),
+        label: 'Expected, with typical delays (s)',
+        data: DATA.per_route.map(r => r.expected_time_s),
         backgroundColor: '#2a78d6',
         borderRadius: 4,
         categoryPercentage: 0.7,

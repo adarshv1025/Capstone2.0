@@ -37,10 +37,17 @@ class RouteResult(BaseModel):
 
     path: list[int] = Field(default_factory=list)
     num_edges: int = 0
-    total_travel_time_s: float = 0.0
+    total_travel_time_s: float = 0.0  # GNN's delay-free time
+    # total_travel_time_s plus the expected cost of delays (RoutingSolver);
+    # this is what the plan promises and what Execution measures against.
+    expected_travel_time_s: float = 0.0
     route_delay_probability: float = 0.0
     total_carbon_kg: float = 0.0
+    expected_carbon_kg: float = 0.0  # total_carbon_kg plus the expected effect of delays
     total_ev_energy_pct: float = 0.0
+    # total_ev_energy_pct plus the expected effect of delays -- what the
+    # Coordinator checks against the battery.
+    expected_ev_energy_pct: float = 0.0
 
     priority: str
     weights_used: dict[str, float] = Field(default_factory=dict)

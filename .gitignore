@@ -10,3 +10,6 @@ gnn_checkpoints_v3/
 dataset_kaggle/
 bengaluru_graph/
 eval_run.log
+
+# LLM call log (prompts and replies), written by agents/llm_client.py
+logs/

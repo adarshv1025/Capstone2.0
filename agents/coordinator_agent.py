@@ -63,8 +63,9 @@ using the exact request_id strings from the input.
 
 Conflict type "ev_range": the JSON's "violations" list has one entry per
 request whose route consumes more EV battery energy than its vehicle's
-actual capacity allows (current {time, delay, carbon, ev} weights and how
-much the route overshoots the battery budget by). For EACH request_id,
+actual capacity allows (current {time, delay, carbon, ev} weights, the
+route's expected energy use including typical delays as route_ev_energy_kwh,
+and the battery size as vehicle_battery_kwh). For EACH request_id,
 decide a new weights dict that shifts enough weight onto "ev" to fix
 feasibility, trading off against the other three as little as necessary.
 Respond with ONLY this JSON object:
@@ -101,6 +102,12 @@ class CoordinatorAgent:
         # Coordinator already worked to route around.
         self.penalized_edges: set = set()
 
+    @staticmethod
+    def _ev_energy_pct(r: RouteResult) -> float:
+        # Falls back to the delay-free figure for a RouteResult built
+        # without an expected value (0.0 is the schema default).
+        return r.expected_ev_energy_pct or r.total_ev_energy_pct
+
     def _detect_conflicts(self, results: list[RouteResult]) -> tuple[dict, list[str]]:
         edge_usage: dict[tuple, list[str]] = defaultdict(list)
         ev_violations: list[str] = []
@@ -113,7 +120,14 @@ class CoordinatorAgent:
 
             vehicle = self.vehicles_by_id.get(r.vehicle_id)
             if vehicle and vehicle.is_ev and vehicle.battery_capacity_kwh is not None:
-                consumed_kwh = (r.total_ev_energy_pct / 100.0) * self.ev_reference_kwh
+                # Range is planned on EXPECTED energy (delays included), not
+                # the delay-free figure. The Execution agent's hard rule
+                # judges the simulated drive, which uses ~35% more at rush
+                # hour, so a route planned at 75-100% of its battery on the
+                # delay-free figure passed here and then failed on the road.
+                # This is the mean, with no reserve: a route planned right
+                # at the battery limit can still run out about half the time.
+                consumed_kwh = (self._ev_energy_pct(r) / 100.0) * self.ev_reference_kwh
                 if consumed_kwh > vehicle.battery_capacity_kwh:
                     ev_violations.append(r.request_id)
 
@@ -241,7 +255,10 @@ class CoordinatorAgent:
                         {
                             "request_id": rid,
                             "current_weights": results_by_id[rid].weights_used,
-                            "route_ev_energy_pct": results_by_id[rid].total_ev_energy_pct,
+                            "route_ev_energy_pct": self._ev_energy_pct(results_by_id[rid]),
+                            "route_ev_energy_kwh": (
+                                self._ev_energy_pct(results_by_id[rid]) / 100.0 * self.ev_reference_kwh
+                            ),
                             "vehicle_battery_kwh": (
                                 self.vehicles_by_id[results_by_id[rid].vehicle_id].battery_capacity_kwh
                                 if results_by_id[rid].vehicle_id in self.vehicles_by_id else None
@@ -302,9 +319,10 @@ if __name__ == "__main__":
 
     # req-0/1/2 share one origin/destination -- with edge_capacity=2 that's
     # a guaranteed edge_overload conflict. req-3 is a separate, unrelated
-    # trip whose default route uses ~9.8% of a 50kWh battery (~4.9kWh); a
-    # 4.8kWh vehicle can't quite make it on the default route but CAN on a
-    # more energy-conscious one -- a genuinely resolvable ev_range conflict,
+    # trip whose default route is expected to use ~6.07kWh once typical
+    # delays are included (4.92kWh delay-free); a 5.9kWh vehicle can't quite
+    # make it on the default route but CAN on a more energy-conscious one
+    # (~5.76kWh expected) -- a genuinely resolvable ev_range conflict,
     # kept independent of the edge_overload trio so the two conflict types
     # don't compound (testing found EV energy correlates strongly with
     # route distance here, so forcing an edge-avoidance detour AND an
@@ -320,7 +338,7 @@ if __name__ == "__main__":
         Vehicle(vehicle_id="veh-0", current_location=shared_origin),
         Vehicle(vehicle_id="veh-1", current_location=shared_origin),
         Vehicle(vehicle_id="veh-2", current_location=shared_origin),
-        Vehicle(vehicle_id="veh-3", is_ev=True, battery_capacity_kwh=4.8, current_location=ev_origin),
+        Vehicle(vehicle_id="veh-3", is_ev=True, battery_capacity_kwh=5.9, current_location=ev_origin),
     ]
     requests_by_id = {}
     for req, veh in zip(requests, vehicles):
@@ -332,7 +350,7 @@ if __name__ == "__main__":
 
     print("\nBefore negotiation:")
     for r in initial_results:
-        print(f"  {r.request_id} -> {r.vehicle_id}  edges={r.num_edges}  ev={r.total_ev_energy_pct:.2f}%")
+        print(f"  {r.request_id} -> {r.vehicle_id}  edges={r.num_edges}  expected_ev={r.expected_ev_energy_pct / 100 * 50:.2f}kWh")
 
     coordinator = CoordinatorAgent(costs_df, vehicles, edge_capacity=2)
     final_results, rounds_used, fully_resolved = coordinator.resolve(initial_results, requests_by_id)
@@ -340,5 +358,5 @@ if __name__ == "__main__":
     print(f"\nAfter negotiation ({rounds_used} round(s) used, fully_resolved={fully_resolved}):")
     for r in final_results:
         status = "OK" if r.success else f"FAILED ({r.reason})"
-        print(f"  {r.request_id} -> {r.vehicle_id}  {status}  edges={r.num_edges}  ev={r.total_ev_energy_pct:.2f}%")
+        print(f"  {r.request_id} -> {r.vehicle_id}  {status}  edges={r.num_edges}  expected_ev={r.expected_ev_energy_pct / 100 * 50:.2f}kWh")
         print(f"      reasoning: {r.reasoning}")

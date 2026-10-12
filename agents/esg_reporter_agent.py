@@ -43,6 +43,17 @@ how far off (in either direction) each route's actual travel time was from
 its planned time -- treat it as the primary on-time-performance figure and
 `on_time_rate` as a secondary, coarser one (it can only take a few discrete
 values on a small batch, so don't over-read small differences in it).
+THREE TIMES: `total_planned_time_s` is the delay-free travel time;
+`total_expected_time_s` adds the delays typical for those routes and is what
+the plan promised; `total_actual_time_s` is the simulated drive. Judge
+punctuality by comparing ACTUAL against EXPECTED -- actual exceeding the
+delay-free planned time is normal traffic, not a failure.
+`mean_abs_time_deviation_pct` and `on_time_rate` are both measured against
+the expected time. Carbon works the same way: `total_planned_carbon_kg` is
+delay-free, `total_expected_carbon_kg` includes typical delays, and
+`total_actual_carbon_kg` is the simulated drive -- compare ACTUAL against
+EXPECTED, and do not describe actual exceeding the delay-free planned figure
+as a problem.
 UNITS: despite its name, `mean_abs_time_deviation_pct` is a FRACTION, not
 a percent -- 0.43 means 43% (NOT 0.43%). `on_time_rate` and
 `ev_feasibility_rate` are fractions too (1.0 = 100%). Write all three as
@@ -83,7 +94,9 @@ class ESGReporterAgent:
         num_routing_failed = len(results) - len(successful)
 
         total_planned_time_s = sum(r.total_travel_time_s for r in successful)
+        total_expected_time_s = sum(r.expected_travel_time_s or r.total_travel_time_s for r in successful)
         total_planned_carbon_kg = sum(r.total_carbon_kg for r in successful)
+        total_expected_carbon_kg = sum(r.expected_carbon_kg or r.total_carbon_kg for r in successful)
 
         reports_by_id = {rep["request_id"]: rep for rep in execution_reports}
         simulated = [reports_by_id[r.request_id] for r in successful if r.request_id in reports_by_id]
@@ -120,8 +133,10 @@ class ESGReporterAgent:
             "num_unassigned": num_unassigned,
             "num_routing_failed": num_routing_failed,
             "total_planned_time_s": total_planned_time_s,
+            "total_expected_time_s": total_expected_time_s,
             "total_actual_time_s": total_actual_time_s,
             "total_planned_carbon_kg": total_planned_carbon_kg,
+            "total_expected_carbon_kg": total_expected_carbon_kg,
             "total_actual_carbon_kg": total_actual_carbon_kg,
             "on_time_rate": on_time_rate,
             "mean_abs_time_deviation_pct": mean_abs_time_deviation_pct,

@@ -10,12 +10,29 @@ Model selection:
     LLM_MODEL env var, e.g. "anthropic/claude-sonnet-5" or "openai/gpt-4o".
     LiteLLM picks the matching API key (ANTHROPIC_API_KEY, OPENAI_API_KEY,
     ...) off the model string's prefix automatically.
+
+Repeatability (added 2026-10-11, CLAUDE.md 9):
+    LLM_TEMPERATURE env var, default 0. Every call is sent at this
+    temperature unless the caller passes its own. Measured before this:
+    one baseline's on_time_rate moved 0.07 -> 0.27 between two runs with
+    identical routes and seed, purely from the Execution agent's LLM judging
+    the same deviations differently. Set LLM_TEMPERATURE to an empty string
+    for a model that rejects the parameter.
+
+Call log:
+    LLM_LOG_PATH env var, default logs/llm_calls.jsonl at the repo root
+    (git-ignored). One JSON line per successful call: messages, reply,
+    model, temperature, latency, token counts. Set it to an empty string to
+    turn logging off.
 """
 
 import json
 import os
 import random
+import threading
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 from litellm import completion
@@ -24,6 +41,23 @@ from litellm.exceptions import RateLimitError
 load_dotenv()
 
 DEFAULT_MODEL = os.environ.get("LLM_MODEL", "anthropic/claude-sonnet-5")
+
+_temperature_env = os.environ.get("LLM_TEMPERATURE", "0").strip()
+DEFAULT_TEMPERATURE = float(_temperature_env) if _temperature_env else None
+
+LOG_PATH = os.environ.get("LLM_LOG_PATH", str(Path(__file__).resolve().parent.parent / "logs" / "llm_calls.jsonl"))
+_log_lock = threading.Lock()  # Route Agents call chat() from several threads at once
+
+
+def _log_call(record: dict) -> None:
+    if not LOG_PATH:
+        return
+    try:
+        Path(LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
+        with _log_lock, open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # a log that can't be written must never fail a pipeline run
 
 
 def chat(messages: list[dict], model: str = None, max_retries: int = 5, retry_backoff_s: float = 3.0, **kwargs) -> str:
@@ -50,10 +84,27 @@ def chat(messages: list[dict], model: str = None, max_retries: int = 5, retry_ba
     Only RateLimitError is retried; other errors (bad request, auth, etc.)
     propagate immediately since retrying won't fix them.
     """
+    if DEFAULT_TEMPERATURE is not None:
+        kwargs.setdefault("temperature", DEFAULT_TEMPERATURE)
+
     for attempt in range(max_retries + 1):
         try:
+            started = time.perf_counter()
             response = completion(model=model or DEFAULT_MODEL, messages=messages, **kwargs)
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            usage = getattr(response, "usage", None)
+            _log_call({
+                "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "model": model or DEFAULT_MODEL,
+                "temperature": kwargs.get("temperature"),
+                "latency_s": round(time.perf_counter() - started, 3),
+                "rate_limit_retries": attempt,
+                "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                "completion_tokens": getattr(usage, "completion_tokens", None),
+                "messages": messages,
+                "reply": content,
+            })
+            return content
         except RateLimitError:
             if attempt == max_retries:
                 raise
@@ -100,7 +151,12 @@ def chat_json(messages: list[dict], model: str = None, max_parse_retries: int = 
     4/4 times, so this is transient, not a prompt problem.
     """
     for attempt in range(max_parse_retries + 1):
-        content = chat(messages, model=model, **kwargs) or ""
+        call_kwargs = dict(kwargs)
+        if attempt and "temperature" not in kwargs and DEFAULT_TEMPERATURE is not None:
+            # Re-asking at temperature 0 can return the same unusable reply;
+            # nudge it up for the retries only.
+            call_kwargs["temperature"] = min(DEFAULT_TEMPERATURE + 0.3 * attempt, 1.0)
+        content = chat(messages, model=model, **call_kwargs) or ""
         text = content.strip()
         if text.startswith("```"):
             text = text.split("```")[1]

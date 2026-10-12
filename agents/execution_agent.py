@@ -43,6 +43,16 @@ NOISE MODEL (per edge, applied on top of costs_df's predicted values)
    physically, more time on a segment (idling, congestion) means
    proportionally more emissions/energy, so tying them to the same jitter
    is more defensible than inventing a third independent noise parameter.
+
+WHAT "DEVIATION" IS MEASURED AGAINST (changed 2026-10-11, CLAUDE.md 9)
+-----------------------------------------------------------------------
+time_deviation_pct = (actual - expected) / expected, where expected is the
+route's expected_travel_time_s: the GNN's time plus what delays are expected
+to add under this same noise model (mean of rule 2 above). It used to be
+measured against the delay-free total_travel_time_s, so the simulation's
+own average delay showed up as a +30-45% "deviation" on nearly every
+rush-hour route and almost everything was flagged for re-planning. Measured
+against the expected time, a deviation is a genuine surprise.
 """
 
 import json
@@ -55,19 +65,25 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "gnn"))
 
 from llm_client import align_ids, chat_json
+# DELAY_EXTRA_TIME_RANGE (the extra multiplier applied when an edge's delay
+# actually fires) lives in routing_solver so the planner's expected time and
+# this simulation share one definition.
+from routing_solver import DELAY_EXTRA_TIME_RANGE, canonical_edges  # noqa: E402
 from schemas import RouteResult, Vehicle
 
 TIME_JITTER_PCT = 0.10               # +-10% baseline prediction noise per edge
-DELAY_EXTRA_TIME_RANGE = (1.3, 2.0)  # extra multiplier applied when an edge's delay actually fires
 TIME_DEVIATION_FLOOR_PCT = 0.15      # below this magnitude, treat as normal variance -- don't even ask the LLM
 EV_REFERENCE_KWH = 50.0              # ev_energy_pct is % of this reference battery, per CLAUDE.md 2.1
 
 REFLECT_SYSTEM_PROMPT = """You are the Execution/Monitoring agent for a fleet of delivery vehicles.
 You are given a list of routes that, once actually driven (simulated
-against real-world variance), deviated from their planned travel time by a
-noticeable amount. time_deviation_pct is (actual - planned) / planned, so a
-POSITIVE value means the trip took LONGER than planned (worse); a NEGATIVE
-value means it finished faster than planned (better).
+against real-world variance), deviated from their expected travel time by a
+noticeable amount. expected_time_s is what the plan promised: it already
+includes the typical delays for that route, so a deviation is a genuine
+surprise, not ordinary traffic. time_deviation_pct is
+(actual - expected) / expected, as a FRACTION (0.20 means 20%), so a
+POSITIVE value means the trip took LONGER than expected (worse); a NEGATIVE
+value means it finished faster than expected (better).
 
 For EACH route, decide whether this deviation is bad enough to interrupt
 the vehicle and trigger a re-plan, or whether it's within normal variance
@@ -85,7 +101,8 @@ from the input.
 
 class ExecutionAgent:
     def __init__(self, costs_df: pd.DataFrame, model: str = None, seed: int = None):
-        self.edge_costs = {(row.src, row.dst): row for row in costs_df.itertuples(index=False)}
+        # canonical_edges: same choice among parallel roads as the solver made.
+        self.edge_costs = {(row.src, row.dst): row for row in canonical_edges(costs_df).itertuples(index=False)}
         self.model = model
         # A seeded RNG makes simulate_route() reproducible for testing;
         # seed=None (default) gives a fresh draw each run, as a real
@@ -152,9 +169,12 @@ class ExecutionAgent:
             if not r.success:
                 continue
             sim = self.simulate_route(r)
+            # Fall back to the delay-free time for a RouteResult built
+            # without an expected time (0.0 is the schema default).
+            expected_time_s = r.expected_travel_time_s or r.total_travel_time_s
             time_deviation_pct = (
-                (sim["actual_time_s"] - r.total_travel_time_s) / r.total_travel_time_s
-                if r.total_travel_time_s > 0 else 0.0
+                (sim["actual_time_s"] - expected_time_s) / expected_time_s
+                if expected_time_s > 0 else 0.0
             )
             hard_ev_violation = self._hard_ev_violation(sim, vehicles_by_id.get(r.vehicle_id))
 
@@ -164,6 +184,7 @@ class ExecutionAgent:
                 "priority": r.priority,
                 **sim,
                 "planned_time_s": r.total_travel_time_s,
+                "expected_time_s": expected_time_s,
                 "time_deviation_pct": time_deviation_pct,
                 "hard_ev_violation": hard_ev_violation,
                 "replan_triggered": hard_ev_violation,
@@ -192,7 +213,7 @@ class ExecutionAgent:
                 {
                     "request_id": r["request_id"],
                     "priority": r["priority"],
-                    "planned_time_s": r["planned_time_s"],
+                    "expected_time_s": r["expected_time_s"],
                     "actual_time_s": r["actual_time_s"],
                     "time_deviation_pct": r["time_deviation_pct"],
                     "num_delayed_edges": r["num_delayed_edges"],
@@ -263,7 +284,7 @@ if __name__ == "__main__":
     for rep in reports:
         flag = "REPLAN" if rep["replan_triggered"] else "ok"
         print(
-            f"  {rep['request_id']} [{flag}] planned={rep['planned_time_s']:.1f}s "
+            f"  {rep['request_id']} [{flag}] expected={rep['expected_time_s']:.1f}s "
             f"actual={rep['actual_time_s']:.1f}s (dev={rep['time_deviation_pct']:+.1%}) "
             f"delayed_edges={rep['num_delayed_edges']}/{rep['num_edges']}"
         )
