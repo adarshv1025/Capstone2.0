@@ -39,6 +39,7 @@ agents/evaluation_results/   raw and summary evaluation CSVs
 sample_costs/        GNN predictions for 5 snapshots (CSV), for running agents without PyTorch
 live_app.py          interactive Streamlit planner (map, live GNN, agent trace)
 CLAUDE.md            full design log, findings and the measured audit (section 7)
+CHANGELOG.md         every change and fix since 27 Sep 2026, newest first
 ```
 
 ## Setup
@@ -106,9 +107,12 @@ with fixed weights and uses no tokens.
 - **GNN v3**, all 381 test snapshots: R^2 0.949 (travel time), 0.969 (delay
   probability), 0.943 (carbon), 0.945 (EV energy); about 0.16 s per snapshot
   on CPU.
-- **Evaluation**, 5 scenarios x 3 systems x 5 snapshots: 75 of 75 runs
-  completed. Across the scenarios the multi-agent system emits 3.9% less CO2
-  than a fastest-route baseline and takes 10.1% longer.
+- **Evaluation** (re-run 12 Oct 2026 after the routing fixes), 5 scenarios x
+  3 systems x 5 snapshots: 75 of 75 runs completed. On expected values
+  (typical delays included) the multi-agent system emits 3.0% less CO2 than
+  a fastest-route baseline and takes 6.6% longer; against a lowest-carbon
+  baseline it emits 2.1% more and is 6.5% faster. Simulated drives land
+  within about 3-6% of the time the plan promises.
 
 ## Known limitations
 
@@ -118,7 +122,8 @@ with fixed weights and uses no tokens.
 - A linear model on the raw road features matches or beats the GNN on three
   of the four targets; the GNN is ahead only on delay probability.
 - The lowest-carbon baseline is both faster and greener than the multi-agent
-  system in 3 of 5 evaluation scenarios.
+  system in 1 of 5 evaluation scenarios (the shared-bottleneck case).
+- The evaluation uses 5 snapshots from a single day and one LLM.
 - The Execution agent only flags re-plans; nothing re-routes yet.
 - Not implemented: the Tsinghua SSSP solver, multi-stop routing, delivery
   deadlines, vehicle-specific carbon, distributed execution, automated tests.

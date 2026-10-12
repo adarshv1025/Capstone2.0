@@ -106,7 +106,7 @@
   </div>
 
   <div class="panel">
-    <h2>Planned vs. simulated-actual time per route (mixed_priority scenario)</h2>
+    <h2>Expected vs. simulated-actual time per route (mixed_priority scenario)</h2>
     <canvas id="routeTimeChart"></canvas>
   </div>
 
@@ -123,7 +123,7 @@
 </div>
 
 <script>
-const DATA = {"cards": [{"label": "Total planned distance-time", "value": "11,142 s"}, {"label": "Total actual (simulated) time", "value": "14,969 s"}, {"label": "Total planned carbon", "value": "25.4 kg"}, {"label": "Total actual (simulated) carbon", "value": "33.7 kg"}, {"label": "Mean abs. time deviation", "value": "34.8%"}, {"label": "EV feasibility rate", "value": "100.0%", "status": "good"}, {"label": "Negotiation rounds used", "value": "3"}, {"label": "Carbon saved by optimizer", "value": "0.0 kg"}], "summary_text": "All 5 delivery requests were successfully routed with no unassigned or failed routes. However, only 40% arrived on time and the average travel time deviated by about 35% from the plan, resulting in roughly 3,800\u202fs (~1.1\u202fh) longer travel and about 8.2\u202fkg more carbon emissions than expected. On the positive side, every route was EV\u2011compatible (100% feasibility) and the carbon optimizer delivered a modest saving of ~0.02\u202fkg. The batch needed three negotiation rounds to resolve conflicts, indicating some coordination overhead.", "per_route": [{"request_id": "mp-0", "planned_time_s": 833.1948609, "actual_time_s": 1175.900720822206}, {"request_id": "mp-1", "planned_time_s": 2420.2206625, "actual_time_s": 3139.844137289681}, {"request_id": "mp-2", "planned_time_s": 2891.35210858, "actual_time_s": 4077.5479837808857}, {"request_id": "mp-3", "planned_time_s": 2763.96559501, "actual_time_s": 3772.846550054315}, {"request_id": "mp-4", "planned_time_s": 2232.89490585, "actual_time_s": 2802.663289709971}], "comparison": {"scenarios": ["edge_overload", "ev_feasible", "ev_infeasible", "large_batch", "mixed_priority"], "datasets_time": [{"label": "Multi-Agent System", "color": "#2a78d6", "data": [6935.425913824601, 1273.16798268, 1887.240440504, 22271.0234653236, 11822.2524833878]}, {"label": "Baseline (time-only)", "color": "#eb6834", "data": [6227.907352698001, 1214.234359314, 1798.1018379774, 20441.6871538676, 10444.0672486138]}, {"label": "Baseline (carbon-only)", "color": "#1baf7a", "data": [6518.713850964001, 1260.350803284, 2012.511563006, 23684.5160880768, 11273.859878875]}], "datasets_carbon": [{"label": "Multi-Agent System", "color": "#2a78d6", "data": [20.27682407246, 2.43460896654, 4.43135109292, 54.483442971248, 26.6737026298548]}, {"label": "Baseline (time-only)", "color": "#eb6834", "data": [21.07469694216, 2.79985158458, 4.8883695965000005, 55.258946440956606, 28.6955305644428]}, {"label": "Baseline (carbon-only)", "color": "#1baf7a", "data": [19.6647558819, 2.34579250196, 4.268176384199999, 53.865723989388, 24.4549281401148]}]}, "ink": {"primary": "#0b0b0b", "secondary": "#52514e", "muted": "#898781"}, "surface": {"chart": "#fcfcfb", "page": "#f9f9f7", "grid": "#e1e0d9", "border": "rgba(11,11,11,0.10)"}, "status": {"good": "#0ca30c", "critical": "#d03b3b"}};
+const DATA = {"cards": [{"label": "Total planned time (no delays)", "value": "10,521 s"}, {"label": "Total expected time (typical delays)", "value": "14,141 s"}, {"label": "Total actual (simulated) time", "value": "14,102 s"}, {"label": "Total planned carbon (no delays)", "value": "25.8 kg"}, {"label": "Total expected carbon (typical delays)", "value": "34.0 kg"}, {"label": "Total actual (simulated) carbon", "value": "33.9 kg"}, {"label": "Mean abs. time deviation", "value": "4.2%"}, {"label": "EV feasibility rate", "value": "100.0%", "status": "good"}, {"label": "Negotiation rounds used", "value": "3"}, {"label": "Carbon saved by optimizer", "value": "0.0 kg"}], "summary_text": "The batch of 5 deliveries was fully routed with no unassigned or failed requests. All deliveries arrived on time \u2013 the on\u2011time rate was 100% and the actual travel time (\u224814,102\u202fs, about 3.92\u202fh) was just 38\u202fs under the expected 14,141\u202fs, giving an average time deviation of only 4.2%. Every route was compatible with electric vehicles (100% EV feasibility) and the batch required only three negotiation rounds to resolve any conflicts. Carbon emissions were essentially on target, with actual emissions of 33.93\u202fkg versus the expected 34.01\u202fkg, and the optimizer\u2019s swaps saved a negligible 0.0002\u202fkg. Overall the run shows strong operational performance, though the carbon\u2011saving impact of the optimizer was minimal.", "per_route": [{"request_id": "mp-0", "planned_time_s": 830.1526399, "expected_time_s": 1111.8630126800756, "actual_time_s": 1048.202961599344}, {"request_id": "mp-1", "planned_time_s": 2304.7800531, "expected_time_s": 3148.1180863700833, "actual_time_s": 3392.694132554666}, {"request_id": "mp-2", "planned_time_s": 2670.43413138, "expected_time_s": 3630.0530993096086, "actual_time_s": 3637.905881162483}, {"request_id": "mp-3", "planned_time_s": 2581.63274001, "expected_time_s": 3400.939223769309, "actual_time_s": 3254.4699944803892}, {"request_id": "mp-4", "planned_time_s": 2134.45922675, "expected_time_s": 2849.7663692918127, "actual_time_s": 2769.137896792772}], "comparison": {"scenarios": ["edge_overload", "ev_feasible", "ev_infeasible", "large_batch", "mixed_priority"], "datasets_time": [{"label": "Multi-Agent System", "color": "#2a78d6", "data": [6533.9109836294, 1260.350803284, 1966.867771346, 21424.2275403236, 10896.0248646634]}, {"label": "Baseline (time-only)", "color": "#eb6834", "data": [6231.38219811, 1215.31507148, 1801.6882636254, 20427.4239184536, 10381.9029831458]}, {"label": "Baseline (carbon-only)", "color": "#1baf7a", "data": [6518.713850964001, 1260.350803284, 1993.959877126, 23651.3240531768, 11215.302194575]}], "datasets_carbon": [{"label": "Multi-Agent System", "color": "#2a78d6", "data": [20.55500578842, 2.34579250196, 4.34687839052, 53.9122804317946, 26.4446685129348]}, {"label": "Baseline (time-only)", "color": "#eb6834", "data": [21.23249850078, 2.89017185994, 4.889144109, 55.3613881857166, 29.0994316400028]}, {"label": "Baseline (carbon-only)", "color": "#1baf7a", "data": [19.6647558819, 2.34579250196, 4.26457886956, 53.840957009588, 24.2767185255948]}]}, "ink": {"primary": "#0b0b0b", "secondary": "#52514e", "muted": "#898781"}, "surface": {"chart": "#fcfcfb", "page": "#f9f9f7", "grid": "#e1e0d9", "border": "rgba(11,11,11,0.10)"}, "status": {"good": "#0ca30c", "critical": "#d03b3b"}};
 
 function isDark() {
   const t = document.documentElement.getAttribute('data-theme');
@@ -152,15 +152,15 @@ DATA.cards.forEach(c => {
 
 document.getElementById('narrative-text').textContent = DATA.summary_text;
 
-// Chart 1: per-route planned vs actual time
+// Chart 1: per-route expected (plan incl. typical delays) vs actual time
 new Chart(document.getElementById('routeTimeChart'), {
   type: 'bar',
   data: {
     labels: DATA.per_route.map(r => r.request_id),
     datasets: [
       {
-        label: 'Planned (s)',
-        data: DATA.per_route.map(r => r.planned_time_s),
+        label: 'Expected, with typical delays (s)',
+        data: DATA.per_route.map(r => r.expected_time_s),
         backgroundColor: '#2a78d6',
         borderRadius: 4,
         categoryPercentage: 0.7,
