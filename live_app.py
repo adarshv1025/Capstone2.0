@@ -25,10 +25,12 @@ Run:
 
 import glob
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
+import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -64,6 +66,14 @@ LABELS = {
     "baseline_time_only": "Fastest baseline (time only)",
     "baseline_carbon_only": "Greenest baseline (carbon only)",
 }
+BENCHMARK_CSV = ROOT / "gnn" / "benchmark_results" / "sssp_benchmark.csv"
+# Categorical slots 1-3 of the same palette as COLORS below, in the step
+# chosen for each theme (validated: all pairs pass in both modes).
+CHART_SERIES = {
+    "light": {"Grid graphs": "#2a78d6", "Sparse random graphs": "#eb6834", "Bengaluru road graph": "#1baf7a"},
+    "dark": {"Grid graphs": "#3987e5", "Sparse random graphs": "#d95926", "Bengaluru road graph": "#199e70"},
+}
+ALGORITHM_OPTIONS = {"Dijkstra": "dijkstra", "Tsinghua BMSSP (Duan et al. 2025)": "bmssp"}
 BASELINE_WEIGHTS = {
     "baseline_time_only": {"time": 1.0, "delay": 0.0, "carbon": 0.0, "ev": 0.0},
     "baseline_carbon_only": {"time": 0.0, "delay": 0.0, "carbon": 1.0, "ev": 0.0},
@@ -291,8 +301,9 @@ def build_map(nodes_df, edge_geom, src, dst, plan):
 # Planning
 # ══════════════════════════════════════════════════════════════════════════
 
-def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use_agents, edge_len, seed):
-    solver = RoutingSolver(costs_df)
+def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use_agents, edge_len, seed,
+               algorithm="dijkstra"):
+    solver = RoutingSolver(costs_df, algorithm=algorithm)
     # Same choice among parallel roads as the solver and the Execution agent.
     ce = canonical_edges(costs_df)
     uv = list(zip(ce["src"].tolist(), ce["dst"].tolist()))
@@ -322,8 +333,17 @@ def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use
         vehicle = Vehicle(vehicle_id="veh-live", is_ev=is_ev,
                           battery_capacity_kwh=battery_kwh if is_ev else None,
                           max_payload_kg=payload_kg, current_location=src)
+        # The agents build their own RoutingSolver, which reads this setting.
+        previous = os.environ.get("ROUTING_ALGORITHM")
+        os.environ["ROUTING_ALGORITHM"] = algorithm
         t0 = time.perf_counter()
-        out = run_full_pipeline([request], [vehicle], costs_df, seed=seed)
+        try:
+            out = run_full_pipeline([request], [vehicle], costs_df, seed=seed)
+        finally:
+            if previous is None:
+                os.environ.pop("ROUTING_ALGORITHM", None)
+            else:
+                os.environ["ROUTING_ALGORITHM"] = previous
         trace["pipeline_s"] = time.perf_counter() - t0
 
         if out["unassigned"]:
@@ -363,9 +383,14 @@ def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use
             trace["reasoning"] += (" Free-text priorities can't be interpreted without the LLM, "
                                    "so this fell back to 'balanced'.")
 
+    # Same single-source search with both shortest-path algorithms, using the
+    # weights the displayed route was planned with, so the page can show how
+    # each one worked and that they agree (about 0.2-0.6 s per plan).
+    trace["algorithms"] = solver.compare_algorithms(src, dst, trace.get("final_weights") or trace["weights"])
+
     return {"routes": routes, "trace": trace, "src": src, "dst": dst,
             "priority": priority, "is_ev": is_ev, "battery_kwh": battery_kwh,
-            "use_agents": use_agents}
+            "use_agents": use_agents, "algorithm": algorithm}
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -405,6 +430,7 @@ ss.setdefault("battery", 20.0)
 ss.setdefault("payload", 200.0)
 ss.setdefault("use_agents", True)
 ss.setdefault("seed", 0)
+ss.setdefault("algorithm", "Dijkstra")
 ss.setdefault("scenario", "—")
 
 
@@ -462,6 +488,10 @@ with st.sidebar:
                            help="Off = deterministic solver only (instant, no API calls).")
     seed = st.number_input("Simulation seed", 0, 10_000, step=1, key="seed",
                            help="Seed for the Execution agent's noise model.")
+    algorithm = ALGORITHM_OPTIONS[st.selectbox(
+        "Shortest-path algorithm", list(ALGORITHM_OPTIONS), key="algorithm",
+        help="Both find a minimum-cost route. BMSSP is the Duan et al. (Tsinghua) algorithm, "
+             "asymptotically faster than Dijkstra but slower at this graph size.")]
     go = st.button("🚚 Plan route", type="primary", width="stretch",
                    disabled=ss.src is None or ss.dst is None or ss.src == ss.dst)
 
@@ -473,7 +503,7 @@ if go:
                     if use_agents else "Solving..."):
         try:
             ss.plan = plan_route(costs_df, ss.src, ss.dst, priority, is_ev, battery_kwh,
-                                 payload_kg, use_agents, edge_len, int(seed))
+                                 payload_kg, use_agents, edge_len, int(seed), algorithm)
             ss.plan["snapshot"] = snap_label
         except Exception as e:  # rate limits etc. -- show, don't crash the app
             ss.plan = {"error": f"{type(e).__name__}: {str(e)[:600]}"}
@@ -523,7 +553,14 @@ ma = routes["multi_agent"]
 
 # ---- Headline metrics ------------------------------------------------------
 st.subheader(f"Planned route — priority: “{plan['priority']}”")
-m = st.columns(6)
+st.caption(
+    "Routes on this page were searched with "
+    + ("the **Tsinghua BMSSP** algorithm" if plan["algorithm"] == "bmssp" else "**Dijkstra**")
+    + ". Both algorithms are compared on this trip further down the page."
+)
+# Two rows of three: six in one row truncates the values ("16.6 ...") on a
+# laptop-width or split-screen window.
+m = st.columns(3) + st.columns(3)
 m[0].metric("Distance", f"{ma['distance_km']:.1f} km", f"{ma['edges']} road segments", delta_color="off")
 m[1].metric("Planned time", f"{ma['time_min']:.1f} min", help="GNN-predicted time with no delays.")
 m[2].metric("Expected with delays", f"{ma['expected_min']:.1f} min",
@@ -571,6 +608,108 @@ chart_df = pd.DataFrame({
 b1, b2 = st.columns(2)
 b1.bar_chart(chart_df[["Time (min)"]], horizontal=True, color=COLORS["multi_agent"])
 b2.bar_chart(chart_df[["CO₂ (kg)"]], horizontal=True, color=COLORS["baseline_carbon_only"])
+
+# ---- Shortest-path algorithms ----------------------------------------------
+st.subheader("Shortest-path search: Dijkstra vs Tsinghua BMSSP")
+alg = trace["algorithms"]
+dj, bm = alg["dijkstra"], alg["bmssp"]
+if alg["same_path"]:
+    verdict = f"Both algorithms found the **same route** ({dj['route_segments']} road segments)."
+elif alg["same_cost"]:
+    verdict = ("Both algorithms found routes of **exactly the same cost** but along different roads "
+               "(a tie between equally good routes).")
+else:
+    verdict = "**The two algorithms disagree on this trip — that is a bug; please report it.**"
+st.markdown(
+    f"{verdict} That is expected: both are exact, so they must return a lowest-cost route. "
+    "What differs is how they search and how much work it takes."
+)
+st.table(
+    pd.DataFrame({
+        "Dijkstra": {
+            "Search time (ms)": f"{dj['ms']:.0f}",
+            "Road segments examined": f"{dj['relaxations']:,}",
+            "How it searches": "One sorted queue; always expands the single closest junction next",
+            "Work behind the search": f"{dj['heap_pushes']:,} queue insertions",
+            "Running time in theory": "m + n log n",
+        },
+        "Tsinghua BMSSP": {
+            "Search time (ms)": f"{bm['ms']:.0f}",
+            "Road segments examined": f"{bm['relaxations']:,}",
+            "How it searches": f"Splits the search into bounded sub-problems, {bm['levels']} levels deep, "
+                               "and carries only a few pivot junctions forward",
+            "Work behind the search": f"{bm['pivot_searches']:,} pivot searches, {bm['queue_pulls']:,} queue pulls, "
+                                      f"{bm['base_cases']:,} small Dijkstra runs",
+            "Running time in theory": "m log^(2/3) n",
+        },
+    })
+)
+st.caption(
+    f"Both searched from the source to all {alg['junctions_settled']:,} reachable junctions "
+    f"({alg['junctions']:,} junctions and {alg['segments']:,} road segments in total), in plain Python, with the "
+    "weights this route was planned with. On this trip the Tsinghua algorithm took "
+    f"{bm['ms'] / max(dj['ms'], 1e-9):.0f} times as long and examined "
+    f"{bm['relaxations'] / max(dj['relaxations'], 1):.1f} times as many road segments. Its advantage is "
+    "theoretical: it grows more slowly on very large graphs."
+)
+
+if BENCHMARK_CSV.exists():
+    bench = pd.read_csv(BENCHMARK_CSV)
+    bench["family"] = bench["graph"].map(
+        lambda g: "Bengaluru road graph" if g.startswith("Bengaluru")
+        else ("Grid graphs" if g.startswith("grid") else "Sparse random graphs"))
+    try:
+        theme = st.context.theme.type or "dark"
+    except Exception:  # older Streamlit without st.context.theme
+        theme = "dark"
+    series = CHART_SERIES.get(theme, CHART_SERIES["dark"])
+    surface = st.get_option("theme.backgroundColor") or ("#0e1117" if theme == "dark" else "#ffffff")
+    color = alt.Color("family:N", title=None,
+                      scale=alt.Scale(domain=list(series), range=list(series.values())),
+                      legend=alt.Legend(orient="top", symbolType="circle"))
+    x = alt.X("n:Q", title="Junctions in the graph (log scale)", scale=alt.Scale(type="log"),
+              axis=alt.Axis(format="~s", grid=False))
+    y = alt.Y("time_ratio:Q", title="Times slower than Dijkstra", scale=alt.Scale(domain=[0, 24]))
+    tooltip = [alt.Tooltip("graph:N", title="Graph"), alt.Tooltip("n:Q", title="Junctions", format=","),
+               alt.Tooltip("dijkstra_ms:Q", title="Dijkstra (ms)", format=",.0f"),
+               alt.Tooltip("bmssp_ms:Q", title="Tsinghua BMSSP (ms)", format=",.0f"),
+               alt.Tooltip("time_ratio:Q", title="Times slower", format=".1f")]
+    lines = alt.Chart(bench[bench["family"] != "Bengaluru road graph"]).mark_line(
+        strokeWidth=2, strokeJoin="round", strokeCap="round").encode(x=x, y=y, color=color)
+    points = alt.Chart(bench).mark_point(filled=True, size=90, opacity=1, stroke=surface, strokeWidth=2).encode(
+        x=x, y=y, color=color, tooltip=tooltip)
+    # Direct labels only where the story is: the grid line's two ends (the
+    # gap narrowing) and this app's own graph. Both lines end at the same
+    # value, so labelling every end would collide.
+    grid = bench[bench["family"] == "Grid graphs"].sort_values("n")
+    grid_ends = pd.concat([grid.head(1), grid.tail(1)]).assign(
+        label=lambda d: d["time_ratio"].map(lambda r: f"{r:.1f} times slower"))
+    blr = bench[bench["family"] == "Bengaluru road graph"]
+    blr_label = pd.DataFrame({"n": [blr["n"].iloc[0]], "time_ratio": [blr["time_ratio"].max()],
+                              "label": [f"this app's graph: {blr['time_ratio'].min():.0f} to {blr['time_ratio'].max():.0f}"]})
+    # Labels wear a text colour, never the series colour (and not Altair's
+    # default black, which disappears on the dark theme).
+    ink = "#c3c2b7" if theme == "dark" else "#52514e"
+    labels = (
+        alt.Chart(grid_ends).mark_text(align="left", dx=8, dy=-12, fontSize=12, color=ink).encode(x=x, y=y, text="label:N")
+        + alt.Chart(blr_label).mark_text(align="left", dx=10, dy=0, fontSize=12, color=ink).encode(x=x, y=y, text="label:N")
+    )
+    st.markdown("**How the gap changes with graph size** (from `gnn/benchmark_sssp.py`)")
+    st.altair_chart((lines + points + labels).properties(height=300), width="stretch")
+    st.caption(
+        "Each point is one benchmark graph; hover for the timings. The Tsinghua algorithm is slower at every size "
+        "tested, but on grid graphs the gap narrows steadily as the graph grows (11.4 times slower at 1,024 "
+        "junctions, 7.0 at 262,144). The four Bengaluru points are the four weightings of this app's own graph. The "
+        "largest sparse random graph was timed from a single source, so that point is the least reliable."
+    )
+    with st.expander("The benchmark numbers as a table"):
+        table = bench[["graph", "n", "m", "dijkstra_ms", "bmssp_ms", "time_ratio", "relaxation_ratio"]].rename(columns={
+            "graph": "Graph", "n": "Junctions", "m": "Road segments", "dijkstra_ms": "Dijkstra (ms)",
+            "bmssp_ms": "Tsinghua BMSSP (ms)", "time_ratio": "Times slower", "relaxation_ratio": "Segments examined (ratio)"})
+        st.dataframe(table.style.format({"Junctions": "{:,}", "Road segments": "{:,}", "Dijkstra (ms)": "{:,.0f}",
+                                         "Tsinghua BMSSP (ms)": "{:,.0f}", "Times slower": "{:.1f}",
+                                         "Segments examined (ratio)": "{:.2f}"}),
+                     width="stretch", hide_index=True)
 
 # ---- Agent trace -----------------------------------------------------------
 st.subheader("What each agent did")
