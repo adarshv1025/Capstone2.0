@@ -41,9 +41,22 @@ USAGE
     )
 """
 
+import os
+import time
+
 import networkx as nx
 import numpy as np
 import pandas as pd
+
+from bmssp import BMSSP, dijkstra_reference
+
+# Which shortest-path search find_route() runs:
+#   "dijkstra" -- networkx's Dijkstra (default)
+#   "bmssp"    -- the Duan et al. "Tsinghua" algorithm, gnn/bmssp.py
+# Both return a minimum-cost route. Where several routes tie on cost they
+# can return different ones, so results are only comparable run to run with
+# the same setting. Chosen per solver, or globally with ROUTING_ALGORITHM.
+ALGORITHMS = ("dijkstra", "bmssp")
 
 # What a delay costs when it happens: that segment takes 30-100% longer.
 # Defined once here and imported by the Execution agent's simulation
@@ -76,9 +89,13 @@ class RoutingSolver:
     COST_COLUMNS = ["travel_time_s", "delay_probability", "carbon_kg", "ev_energy_pct"]
     OBJECTIVES = ("time", "delay", "carbon", "ev")
 
-    def __init__(self, costs_df: pd.DataFrame, delay_slowdown: float = DELAY_SLOWDOWN):
+    def __init__(self, costs_df: pd.DataFrame, delay_slowdown: float = DELAY_SLOWDOWN, algorithm: str = None):
         self.costs_df = costs_df
         self.delay_slowdown = delay_slowdown
+        self.algorithm = (algorithm or os.environ.get("ROUTING_ALGORITHM") or "dijkstra").lower()
+        if self.algorithm not in ALGORITHMS:
+            raise ValueError(f"Unknown routing algorithm {self.algorithm!r}; expected one of {ALGORITHMS}")
+        self.last_search_s = None  # wall time of the most recent shortest-path search
 
         edges = canonical_edges(costs_df)
         t = edges["travel_time_s"].to_numpy(dtype=float)
@@ -178,6 +195,81 @@ class RoutingSolver:
             d["weight"] = cost(u, v, d)
         return G
 
+    def route_cost(self, path: list, weights: dict, penalized_edges: set = None, penalty_factor: float = 5.0) -> float:
+        """The scalar cost find_route() minimises, summed along a given path."""
+        cost = self._cost_fn(weights, penalized_edges, penalty_factor)
+        return sum(cost(u, v, self._G[u][v]) for u, v in zip(path[:-1], path[1:]))
+
+    def compare_algorithms(self, source, target, weights: dict = None) -> dict:
+        """
+        Runs the same single-source search from `source` with Dijkstra and
+        with BMSSP, on identical adjacency lists, and reports each one's wall
+        time and work plus whether their routes to `target` agree. Both are
+        pure-Python full searches (every reachable vertex settled), so the
+        numbers are comparable with each other -- unlike find_route()'s
+        default, which is networkx's early-exit point-to-point search.
+        """
+        weights = weights or {"time": 0.25, "delay": 0.25, "carbon": 0.25, "ev": 0.25}
+        G = self._G
+        cost = self._cost_fn(weights)
+        adj = {u: [(v, cost(u, v, d)) for v, d in nbrs.items()] for u, nbrs in G.adj.items()}
+
+        def path_to(pred):
+            path = [target]
+            while path[-1] != source:
+                path.append(pred[path[-1]])
+            return path[::-1]
+
+        started = time.perf_counter()
+        d_dist, d_pred, d_stats = dijkstra_reference(adj, source)
+        d_seconds = time.perf_counter() - started
+
+        solver = BMSSP(adj, G.number_of_nodes())
+        started = time.perf_counter()
+        b_dist, b_pred = solver.run(source)
+        b_seconds = time.perf_counter() - started
+
+        reachable = target in d_dist and target in b_dist
+        d_path = path_to(d_pred) if reachable else []
+        b_path = path_to(b_pred) if reachable else []
+        d_cost = d_dist.get(target, float("inf"))
+        b_cost = b_dist.get(target, float("inf"))
+        return {
+            "junctions": G.number_of_nodes(),
+            "segments": G.number_of_edges(),
+            "junctions_settled": len(d_dist),
+            "dijkstra": {"ms": d_seconds * 1000, "relaxations": d_stats["relaxations"],
+                         "heap_pushes": d_stats["heap_pushes"], "route_cost": d_cost, "route_segments": max(len(d_path) - 1, 0)},
+            "bmssp": {"ms": b_seconds * 1000, "relaxations": solver.stats["relaxations"],
+                      "pivot_searches": solver.stats["find_pivots"], "queue_pulls": solver.stats["pulls"],
+                      "base_cases": solver.stats["base_cases"], "levels": solver.top_level, "k": solver.k, "t": solver.t,
+                      "route_cost": b_cost, "route_segments": max(len(b_path) - 1, 0)},
+            "same_cost": reachable and abs(d_cost - b_cost) <= 1e-9 * max(1.0, d_cost),
+            "same_path": reachable and d_path == b_path,
+            "all_distances_agree": set(d_dist) == set(b_dist) and all(
+                abs(b_dist[v] - x) <= 1e-9 * max(1.0, x) for v, x in d_dist.items()),
+        }
+
+    def _bmssp_path(self, source, target, cost) -> list:
+        """
+        Same contract as nx.shortest_path(G, source, target, weight=cost),
+        computed with BMSSP. It is a single-source algorithm, so it settles
+        every reachable vertex and the path is read off the predecessor tree.
+        """
+        G = self._G
+        for node in (source, target):
+            if node not in G:
+                raise nx.NodeNotFound(f"Node {node} is not in the routing graph")
+        adj = {u: [(v, cost(u, v, d)) for v, d in nbrs.items()] for u, nbrs in G.adj.items()}
+        dist, pred = BMSSP(adj, G.number_of_nodes()).run(source)
+        if target not in dist:
+            raise nx.NetworkXNoPath
+        path = [target]
+        while path[-1] != source:
+            path.append(pred[path[-1]])
+        path.reverse()
+        return path
+
     def find_route(
         self, source, target, weights: dict = None, penalized_edges: set = None, penalty_factor: float = 5.0
     ) -> dict:
@@ -199,12 +291,19 @@ class RoutingSolver:
         weights = weights or {"time": 0.25, "delay": 0.25, "carbon": 0.25, "ev": 0.25}
         G = self._G
 
+        cost = self._cost_fn(weights, penalized_edges, penalty_factor)
+        started = time.perf_counter()
         try:
-            path = nx.shortest_path(G, source, target, weight=self._cost_fn(weights, penalized_edges, penalty_factor))
+            if self.algorithm == "bmssp":
+                path = self._bmssp_path(source, target, cost)
+            else:
+                path = nx.shortest_path(G, source, target, weight=cost)
         except nx.NetworkXNoPath:
             return {"success": False, "reason": f"No path found from {source} to {target}"}
         except nx.NodeNotFound as e:
             return {"success": False, "reason": str(e)}
+        finally:
+            self.last_search_s = time.perf_counter() - started
 
         edges = list(zip(path[:-1], path[1:]))
         total_time = sum(G[u][v]["travel_time_s"] for u, v in edges)
