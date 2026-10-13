@@ -1189,8 +1189,8 @@ Reading these honestly:
 
 The team told the review panel a newer shortest-path algorithm (the
 "Tsinghua SSSP" algorithm, asymptotically faster than Dijkstra on sparse
-graphs) would replace Dijkstra. **Status: not implemented** — the code uses
-`nx.shortest_path` / `nx.single_source_dijkstra_path_length` only.
+graphs) would replace Dijkstra. **Status when this audit was written: not
+implemented. Implemented on 2026-10-12 — see section 10.**
 
 Measured on an idle machine, 60 random origin-destination pairs:
 point-to-point Dijkstra 5.9 ms; single-source to all nodes 22.5 ms;
@@ -1265,10 +1265,10 @@ Before Review 3:
 2. **Fix known defects (7.5) — DONE 2026-10-12, see 9.** Six fixes plus EV
    range on expected energy (9.5); evaluation re-run and dashboard
    regenerated (9.6).
-3. **Tsinghua SSSP solver (promised to the panel):** second selectable
-   solver, verified identical to Dijkstra, benchmarked here and on larger
-   graphs, reported as measured (see 7.4 for why no speed-up is expected at
-   this size).
+3. **Tsinghua SSSP solver (promised to the panel) — DONE 2026-10-12, see
+   10.** Implemented from the paper, selectable next to Dijkstra, verified
+   against Dijkstra, benchmarked. It is 14-22x slower than Dijkstra on our
+   graph, as expected at this size.
 4. **Close the feedback loop:** replay snapshots in time order as the "live
    feed"; inject a mid-trip disruption (incident / rain) by editing snapshot
    features and re-running the GNN (~0.2s); make the Execution agent's
@@ -1492,4 +1492,126 @@ Reading these honestly:
   baseline.
 - Still 5 snapshots from a single day (2024-06-23, 13:00-21:00) and one LLM;
   see Phase 8 before drawing strong conclusions.
+
+## 10. Phase 3 — the "Tsinghua SSSP" algorithm (2026-10-12)
+
+### 10.1 What was implemented
+
+`gnn/bmssp.py` implements the algorithm of R. Duan, J. Mao, X. Mao, X. Shu,
+L. Yin, "Breaking the Sorting Barrier for Directed Single-Source Shortest
+Paths", arXiv:2504.17033 (v2, 30 Jul 2025) — O(m log^(2/3) n) against
+Dijkstra's O(m + n log n). Written from the paper's Algorithm 1
+(FindPivots), Algorithm 2 (BaseCase), Algorithm 3 (BMSSP) and the Lemma 3.3
+partial-sorting structure (`BlockQueue`). No third-party code. Community
+implementations exist (Java, Rust) and were not used.
+
+Parameters on the Bengaluru graph (n = 7,095, m = 15,000): k = 2, t = 5,
+3 recursion levels, queue block sizes 1024 / 32 / 1. Maximum in- and
+out-degree is 4.
+
+Ties are handled as the paper's Assumption 2.1 prescribes: every label is
+the triple (distance, hops, vertex id) and every bound is such a triple.
+This matters here because robust scaling gives some edges cost exactly 0
+(24 with balanced weights).
+
+### 10.2 Where it differs from the paper — say these when reporting it
+
+1. **No constant-degree transformation.** Needed for the running-time
+   proof, not correctness; our graph's degree is already at most 4.
+2. **`BlockQueue` simplifications.** The paper's layout is kept (two block
+   sequences, blocks of at most M pairs, an upper bound per inserted block),
+   but block bounds live in a sorted list searched by bisection instead of a
+   balanced search tree, and medians / "the M smallest" are found by sorting
+   a block instead of linear-time selection. Correctness is unaffected; the
+   code therefore does **not** strictly attain the O(m log^(2/3) n) bound.
+3. **One safeguard the pseudocode leaves implicit.** When a recursive call
+   completes a vertex that is still waiting in the current level's queue
+   with an older, larger value, that stale pair is deleted. The paper's
+   pseudocode never removes it, although its Lemma 3.10 and Remark 3.8
+   assume it is not there. Measured: the safeguard fires about 220 times per
+   source on the Bengaluru graph. Without it distances are still correct
+   (0 mismatches on 200 random graphs) but vertices are completed more than
+   once (1,871 duplicate completions on those graphs); with it, none are.
+
+### 10.3 Integration
+
+- `RoutingSolver(costs_df, algorithm="dijkstra" | "bmssp")`, or the
+  `ROUTING_ALGORITHM` environment variable (agents build their own solver
+  and read it). Default stays `dijkstra`, so nothing changes unless asked.
+- `find_route()` records `last_search_s`; `route_cost(path, weights)` prices
+  a path under given weights.
+- BMSSP is single-source: it settles every reachable vertex and the route is
+  read off the predecessor tree, so it is not comparable with networkx's
+  early-exit point-to-point Dijkstra call for call.
+- Both return a minimum-cost route. Where several routes tie on cost they
+  may return different ones, so keep the algorithm fixed within an
+  evaluation. On 174 real routes (3 weightings) and the six demo scenarios
+  the routes were identical.
+- `live_app.py`: "Shortest-path algorithm" selector, and (added 2026-10-13)
+  a "Dijkstra vs Tsinghua BMSSP" section on every plan. Both algorithms
+  return the same route, so the selector alone changes nothing visible; the
+  section shows what does differ. It calls
+  `RoutingSolver.compare_algorithms(source, target, weights)`, which runs
+  the same single-source search with `bmssp.dijkstra_reference()` (a
+  counting pure-Python Dijkstra) and with BMSSP on identical adjacency lists
+  and reports time, relaxations, BMSSP's internal counts and whether the
+  routes agree. Below it, an Altair chart of `time_ratio` against graph size
+  from `gnn/benchmark_results/sssp_benchmark.csv`, with a table view. Costs
+  about 0.2-0.6 s per plan.
+- After changing anything under `gnn/` or `agents/`, restart Streamlit: a
+  page refresh re-reads only `live_app.py`, not imported modules.
+
+### 10.4 Verification
+
+`tests/test_bmssp.py` (pytest-compatible, also runs as a script, no LLM):
+tiny graphs, zero-weight cycles, unreachable vertices, a long chain with
+expensive shortcut edges, random graphs with five weight styles (floats,
+many ties, zeros and ones, all equal, all zero), a grid, the queue against a
+sorted-list model, and the Bengaluru graph (4 weightings x 5 sources). All
+pass. A separate stress run of 400 random graphs (n from 3 to 6,000) had 0
+mismatches against Dijkstra. The predecessor tree is checked too: every
+vertex's distance equals its parent's plus the edge weight.
+
+### 10.5 Benchmark (`gnn/benchmark_sssp.py`, results in `gnn/benchmark_results/`)
+
+Both algorithms as single-source searches to every vertex, same adjacency
+lists, pure Python, median wall time. "Theory" is the ratio of the two
+bounds' leading terms, m log^(2/3) n / (m + n log n), constants ignored.
+
+| graph | n | m | Dijkstra | BMSSP | BMSSP slower by | relaxations | theory |
+|---|---|---|---|---|---|---|---|
+| Bengaluru, time only | 7,095 | 15,000 | 26 ms | 576 ms | 22.0x | 3.6x | 0.78 |
+| Bengaluru, carbon only | 7,095 | 15,000 | 32 ms | 465 ms | 14.4x | 3.7x | 0.78 |
+| Bengaluru, balanced | 7,095 | 15,000 | 34 ms | 586 ms | 17.4x | 3.6x | 0.78 |
+| Bengaluru, greenest | 7,095 | 15,000 | 36 ms | 564 ms | 15.9x | 3.7x | 0.78 |
+| grid 32x32 | 1,024 | 3,968 | 3 ms | 34 ms | 11.4x | 3.3x | 1.30 |
+| grid 64x64 | 4,096 | 16,128 | 12 ms | 106 ms | 9.0x | 3.2x | 1.29 |
+| grid 128x128 | 16,384 | 65,024 | 111 ms | 842 ms | 7.6x | 3.2x | 1.28 |
+| grid 256x256 | 65,536 | 261,120 | 432 ms | 3,182 ms | 7.4x | 3.1x | 1.27 |
+| grid 512x512 | 262,144 | 1,046,528 | 2,107 ms | 14,698 ms | 7.0x | 3.2x | 1.25 |
+| sparse random | 1,000 | 2,098 | 4 ms | 42 ms | 12.1x | 3.4x | 0.81 |
+| sparse random | 4,000 | 8,397 | 26 ms | 166 ms | 6.3x | 3.4x | 0.78 |
+| sparse random | 16,000 | 33,598 | 133 ms | 629 ms | 4.7x | 2.4x | 0.76 |
+| sparse random | 64,000 | 134,400 | 688 ms | 2,972 ms | 4.3x | 2.4x | 0.74 |
+| sparse random | 256,000 | 537,600 | 4,081 ms | 28,440 ms | 7.0x | 2.1x | 0.72 |
+
+Reading these honestly:
+- **BMSSP is slower than Dijkstra at every size tested**, by 4-22x, and
+  14-22x on our graph. It performs 2-4x as many edge relaxations and has far
+  more bookkeeping per step.
+- **The gap narrows as graphs grow** on the grid (11.4x at 1k vertices to
+  7.0x at 262k), which is the direction the theory predicts, but there is no
+  crossover anywhere near these sizes. The largest random graph is a single
+  source and is noisier (7.0x after 4.3x).
+- Even the theory's own ratio is only 0.72-0.78 on graphs this sparse and
+  above 1 on the grid: the advantage is a slowly growing log factor.
+- In the application the search is about 1% of a routing call and far less
+  of an LLM plan, so the choice of algorithm does not change what a user
+  sees.
+
+**What to tell the panel:** the algorithm is implemented from the paper,
+returns the same shortest paths as Dijkstra on every test, and is selectable
+in the app; it is asymptotically faster but, measured, slower at city scale,
+so Dijkstra remains the default. "Better than Dijkstra" should be stated as
+"asymptotically faster", not "faster in practice here".
 

@@ -27,13 +27,15 @@ traffic snapshot -> GNN (per-road costs) -> Dispatcher -> Route Agents
 | ESG Reporter | `agents/esg_reporter_agent.py` | Yes (summary) | Aggregates metrics and writes a short report |
 
 The road graph has 7,095 junctions and 15,083 road segments. Routing is a
-weighted shortest-path search (`gnn/routing_solver.py`, Dijkstra via
-NetworkX) over the GNN's predicted costs.
+weighted shortest-path search (`gnn/routing_solver.py`) over the GNN's
+predicted costs. Two search algorithms are available: Dijkstra (default) and
+the Duan et al. 2025 "Tsinghua" algorithm (`gnn/bmssp.py`, see below).
 
 ## Repository layout
 
 ```
-gnn/                 GNN model, trainer, inference wrapper, routing solver
+gnn/                 GNN model, trainer, inference wrapper, routing solver, BMSSP solver and its benchmark
+tests/               tests that need no LLM (currently the BMSSP solver)
 agents/              the six agents, pipeline, evaluation harness, static dashboard
 agents/evaluation_results/   raw and summary evaluation CSVs
 sample_costs/        GNN predictions for 5 snapshots (CSV), for running agents without PyTorch
@@ -78,6 +80,8 @@ No API key needed:
 
 ```bash
 python agents/dispatcher_agent.py        # vehicle assignment smoke test
+python tests/test_bmssp.py               # Tsinghua solver vs Dijkstra (or: pytest tests/)
+python gnn/benchmark_sssp.py --quick     # Dijkstra vs Tsinghua solver timings (drop --quick for the full run)
 ```
 
 Needs the LLM key:
@@ -114,6 +118,21 @@ with fixed weights and uses no tokens.
   baseline it emits 2.1% more and is 6.5% faster. Simulated drives land
   within about 3-6% of the time the plan promises.
 
+## The Tsinghua shortest-path algorithm
+
+`gnn/bmssp.py` is our implementation of R. Duan, J. Mao, X. Mao, X. Shu and
+L. Yin, "Breaking the Sorting Barrier for Directed Single-Source Shortest
+Paths", arXiv:2504.17033 (2025), which runs in O(m log^(2/3) n) against
+Dijkstra's O(m + n log n). Use it with
+`RoutingSolver(costs_df, algorithm="bmssp")`, by setting
+`ROUTING_ALGORITHM=bmssp`, or from the app's sidebar.
+
+It returns the same shortest paths as Dijkstra on every test. Measured, it
+is 14-22 times slower than Dijkstra on the Bengaluru graph (7,095 junctions)
+and still 7 times slower at 262,144 junctions: its advantage is asymptotic
+and does not show at city scale, so Dijkstra stays the default. `CLAUDE.md`
+section 10 lists the three places the code differs from the paper.
+
 ## Known limitations
 
 - Real Kaggle traffic values cover 481 of 15,083 road segments (3.2%); the
@@ -125,8 +144,8 @@ with fixed weights and uses no tokens.
   system in 1 of 5 evaluation scenarios (the shared-bottleneck case).
 - The evaluation uses 5 snapshots from a single day and one LLM.
 - The Execution agent only flags re-plans; nothing re-routes yet.
-- Not implemented: the Tsinghua SSSP solver, multi-stop routing, delivery
-  deadlines, vehicle-specific carbon, distributed execution, automated tests.
+- Not implemented: multi-stop routing, delivery deadlines, vehicle-specific
+  carbon, distributed execution, automated tests beyond `tests/`.
 
 `CLAUDE.md` section 7 has the full audit, per-stage completion scores and the
 list of known defects.

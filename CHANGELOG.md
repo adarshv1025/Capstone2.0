@@ -18,6 +18,86 @@ since the original two commits.
 
 ---
 
+## 13 Oct 2026 — Algorithm comparison shown in the app
+
+### Live app: "Dijkstra vs Tsinghua BMSSP" panel
+- **What:** every planned route now has a section comparing the two
+  shortest-path algorithms on that trip: search time, road segments
+  examined, how each one searches, the work behind it, its theoretical
+  running time, and a plain statement that both found the same route. Below
+  it, a chart from the benchmark shows how many times slower the Tsinghua
+  algorithm is as graphs grow, with the numbers available as a table.
+- **Why:** both algorithms return the same route, so selecting one or the
+  other changed nothing visible on the page except one small grey line. The
+  real differences (how they search, how much work, how they scale) were not
+  shown anywhere.
+- **Files:** `live_app.py`, `gnn/routing_solver.py` (new
+  `compare_algorithms()`), `gnn/bmssp.py` (new `dijkstra_reference()`, a
+  counting Dijkstra used for the like-for-like comparison).
+- **Checked by:** automated app check on the six scenarios with both
+  algorithms (12 of 12 pass, same route every time); viewed in the browser in
+  the dark theme. Chart colours validated for colour-blind separation in
+  light and dark themes.
+- **Example (HSR Layout to Whitefield, balanced):** same 53-segment route;
+  Dijkstra examined 14,957 road segments in about 17 ms, the Tsinghua
+  algorithm 54,207 in about 130 ms.
+- **Replaces:** the earlier one-line caption comparing the two times, which
+  only appeared when the Tsinghua algorithm was selected.
+- **Note for whoever runs the app:** after pulling new code, restart
+  `streamlit run live_app.py`. A page refresh alone reloads `live_app.py` but
+  not the modules it imports, and gives an AttributeError.
+
+---
+
+## 12 Oct 2026 — Phase 3: the Tsinghua shortest-path algorithm
+
+Details and the full benchmark table: `CLAUDE.md` section 10.
+
+### New solver: `gnn/bmssp.py`
+- **What:** our own implementation of the algorithm from Duan, Mao, Mao, Shu
+  and Yin, "Breaking the Sorting Barrier for Directed Single-Source Shortest
+  Paths" (arXiv:2504.17033), written from the paper's Algorithms 1-3 and
+  Lemma 3.3. Selectable next to Dijkstra with
+  `RoutingSolver(costs_df, algorithm="bmssp")` or the `ROUTING_ALGORITHM`
+  environment variable. Dijkstra stays the default.
+- **Why:** the team told the review panel this algorithm would be added.
+- **Files:** `gnn/bmssp.py` (new), `gnn/routing_solver.py`.
+- **Checked by:** `tests/test_bmssp.py` (6 tests, all pass) and a stress run
+  of 400 random graphs with 0 mismatches against Dijkstra. On 174 real
+  routes and the six demo scenarios it returns the identical route.
+- **Three differences from the paper, on record:** no constant-degree
+  rewrite of the graph (ours already has degree at most 4); the queue uses
+  sorting and a sorted list where the paper uses linear-time selection and a
+  balanced tree, so the code does not strictly reach the paper's time bound;
+  and one added safeguard that deletes a stale queue entry the pseudocode
+  leaves behind (it fires about 220 times per search on our graph; without
+  it results are still correct but some junctions are processed twice).
+
+### Benchmark: `gnn/benchmark_sssp.py`
+- **What:** Dijkstra against the new algorithm on the Bengaluru graph and on
+  test graphs from 1,000 to 262,144 junctions. Results in
+  `gnn/benchmark_results/sssp_benchmark.csv`.
+- **Result:** the new algorithm is slower at every size tested: 14-22x on
+  the Bengaluru graph (about 465-586 ms against 26-36 ms per full search).
+  On grid graphs the gap narrows from 11.4x at 1,024 junctions to 7.0x at
+  262,144. It is asymptotically faster, not faster in practice at city
+  scale.
+
+### Tests folder started
+- **What:** `tests/test_bmssp.py`, runnable with pytest or as a script, no
+  LLM or API key needed.
+
+### Live app: algorithm selector
+- **What:** "Shortest-path algorithm" choice in the sidebar. With the
+  Tsinghua algorithm selected, the page runs the same query with both
+  algorithms and shows both times and whether the route is identical.
+- **Files:** `live_app.py`.
+- **Checked by:** automated app check with both algorithms on the six
+  scenarios (12 of 12 pass, identical figures), and one full LLM run with
+  the new algorithm selected.
+
+---
+
 ## 12 Oct 2026 — Phase 2 finished: EV range fix, evaluation re-run
 
 ### EV range is planned on expected energy
@@ -61,6 +141,16 @@ since the original two commits.
   across two Groq accounts.
 - **Also checked:** 54 of 54 live-app checks; LLM-on results identical to the
   previous day's run, which confirms temperature 0 gives repeatable answers.
+
+### Live app: headline figures in two rows
+- **What:** the six headline figures (distance, planned time, expected time,
+  90% arrival, CO2, EV energy) are laid out in two rows of three instead of
+  one row of six.
+- **Why:** in a laptop-width or split-screen window the values were cut off
+  ("16.6 ...").
+- **Files:** `live_app.py`.
+- **Checked by:** viewed in the browser at 800 px width; six scenarios pass
+  the automated app check with the LLM off.
 
 ### This change log
 - **What:** `CHANGELOG.md` created; linked from `README.md` and `CLAUDE.md`.
@@ -301,3 +391,6 @@ Review 3 package, then the paper work.
 | `0a83696` | 11 Oct | README, measured audit, evaluation re-run on fixed agents. |
 | `00b0cf3` | 12 Oct | Phase 2 code: routing fixes, expected-value planning, EV range fix, repeatable and logged LLM calls. |
 | `fdb8497` | 12 Oct | Evaluation re-run, regenerated dashboard, `CHANGELOG.md`, updated `README.md` and `CLAUDE.md`. |
+| `8885af5` | 13 Oct | Phase 3: Tsinghua BMSSP solver, solver option, tests, benchmark and results. |
+| `8b14c12` | 13 Oct | Live app: algorithm selector, Dijkstra vs BMSSP comparison panel, two-row headline figures. |
+| the commit after `8b14c12` | 13 Oct | Change log, `CLAUDE.md` section 10 and `README.md` for Phase 3 and the comparison panel. |
