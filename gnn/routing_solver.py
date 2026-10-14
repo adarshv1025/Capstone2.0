@@ -89,7 +89,18 @@ class RoutingSolver:
     COST_COLUMNS = ["travel_time_s", "delay_probability", "carbon_kg", "ev_energy_pct"]
     OBJECTIVES = ("time", "delay", "carbon", "ev")
 
-    def __init__(self, costs_df: pd.DataFrame, delay_slowdown: float = DELAY_SLOWDOWN, algorithm: str = None):
+    def __init__(self, costs_df: pd.DataFrame, delay_slowdown: float = DELAY_SLOWDOWN, algorithm: str = None,
+                 reference_costs: pd.DataFrame = None):
+        """
+        reference_costs: only for RE-planning on costs that have changed
+        since a route was planned (agents/feedback_loop.py). Pass the costs
+        the original plan was made on, and every edge is then priced in that
+        plan's units: an unchanged edge costs exactly what it did, and an
+        edge whose prediction is now r times higher costs r times more.
+        Without it the costs would be re-scaled to the new percentiles and
+        capped at 1.0, so a road that was already long and has now become 4x
+        slower would look no worse than before.
+        """
         self.costs_df = costs_df
         self.delay_slowdown = delay_slowdown
         self.algorithm = (algorithm or os.environ.get("ROUTING_ALGORITHM") or "dijkstra").lower()
@@ -117,12 +128,25 @@ class RoutingSolver:
         # than less delay: measured on Koramangala -> Hebbal, a high delay
         # weight gave a route 42% slower that was twice as likely to run
         # 30%+ late.
-        norm = np.column_stack([
-            self._robust_scale(expected_t),
-            self._robust_scale(p * t),
-            self._robust_scale(carbon),
-            self._robust_scale(ev),
-        ])
+        raw = np.column_stack([expected_t, p * t, carbon, ev])
+        if reference_costs is None:
+            norm = np.column_stack([self._robust_scale(raw[:, i]) for i in range(raw.shape[1])])
+        else:
+            ref = canonical_edges(reference_costs)
+            rt = ref["travel_time_s"].to_numpy(dtype=float)
+            rp = ref["delay_probability"].to_numpy(dtype=float)
+            ref_raw = np.column_stack([
+                rt * (1.0 + delay_slowdown * rp), rp * rt,
+                ref["carbon_kg"].to_numpy(dtype=float), ref["ev_energy_pct"].to_numpy(dtype=float),
+            ])
+            ref_norm = np.column_stack([self._robust_scale(ref_raw[:, i]) for i in range(ref_raw.shape[1])])
+            # Parallel roads: each frame keeps its own faster one, so match
+            # the two by (src, dst) rather than by row.
+            ref_row = {uv: i for i, uv in enumerate(zip(ref["src"].tolist(), ref["dst"].tolist()))}
+            rows = [ref_row[uv] for uv in zip(edges["src"].tolist(), edges["dst"].tolist())]
+            ref_raw, ref_norm = ref_raw[rows], ref_norm[rows]
+            ratio = np.divide(raw, ref_raw, out=np.ones_like(raw), where=ref_raw > 1e-12)
+            norm = ref_norm * ratio
 
         # Built once per solver. find_route() used to rebuild a weighted
         # DiGraph row by row on every call (~380ms of a ~590ms call, vs ~6ms
@@ -305,6 +329,16 @@ class RoutingSolver:
         finally:
             self.last_search_s = time.perf_counter() - started
 
+        return {"success": True, **self.path_totals(path), "weights_used": weights}
+
+    def path_totals(self, path: list) -> dict:
+        """
+        Route-level totals for ANY path over this graph's edges -- what
+        find_route() reports for the path it chose. Lets a caller price a
+        path it did not get from this solver, e.g. the remainder of a route
+        planned on other costs (agents/feedback_loop.py).
+        """
+        G = self._G
         edges = list(zip(path[:-1], path[1:]))
         total_time = sum(G[u][v]["travel_time_s"] for u, v in edges)
         expected_time = sum(G[u][v]["expected_time_s"] for u, v in edges)
@@ -319,7 +353,6 @@ class RoutingSolver:
         route_delay_probability = 1.0 - no_delay_prob
 
         return {
-            "success": True,
             "path": path,
             "num_edges": len(edges),
             "total_travel_time_s": total_time,
@@ -329,7 +362,6 @@ class RoutingSolver:
             "expected_carbon_kg": expected_carbon,
             "total_ev_energy_pct": total_ev,
             "expected_ev_energy_pct": expected_ev,
-            "weights_used": weights,
         }
 
 

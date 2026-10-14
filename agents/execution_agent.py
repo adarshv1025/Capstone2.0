@@ -23,9 +23,10 @@ Split, same pattern as the rest of this layer (CLAUDE.md 3.2):
    bad enough to actually interrupt and re-plan, or just normal variance
    worth logging and continuing.
 
-Actually triggering a new routing pass in response to replan_triggered is
-out of scope here -- this agent's job (per the roster) is to simulate and
-flag, not to re-plan. A later phase or the eval harness consumes the flag.
+run() below simulates a whole trip and only then sets replan_triggered, so
+that flag is raised after the trip is over and nothing acts on it. Re-planning
+while the vehicle is still driving is agents/feedback_loop.py (added
+2026-10-13, CLAUDE.md 11), which reuses simulate_edge() from this file.
 
 NOISE MODEL (per edge, applied on top of costs_df's predicted values)
 -----------------------------------------------------------------------
@@ -99,6 +100,25 @@ from the input.
 """
 
 
+def simulate_edge(row, rng: random.Random) -> tuple[float, float, float, bool]:
+    """
+    One edge under the NOISE MODEL in the module docstring. `row` needs
+    travel_time_s, delay_probability, carbon_kg and ev_energy_pct. Returns
+    (actual_time_s, actual_carbon_kg, actual_ev_energy_pct, delayed).
+
+    Shared by ExecutionAgent.simulate_route() and the closed-loop executor
+    (agents/feedback_loop.py), so both simulate the world the same way. The
+    order of the three random draws is part of the contract: a seeded run
+    must keep reproducing the same outcomes.
+    """
+    edge_time = row.travel_time_s * (1.0 + rng.uniform(-TIME_JITTER_PCT, TIME_JITTER_PCT))
+    delayed = rng.random() < row.delay_probability
+    if delayed:
+        edge_time *= rng.uniform(*DELAY_EXTRA_TIME_RANGE)
+    time_ratio = edge_time / row.travel_time_s if row.travel_time_s > 0 else 1.0
+    return edge_time, row.carbon_kg * time_ratio, row.ev_energy_pct * time_ratio, delayed
+
+
 class ExecutionAgent:
     def __init__(self, costs_df: pd.DataFrame, model: str = None, seed: int = None):
         # canonical_edges: same choice among parallel roads as the solver made.
@@ -126,16 +146,11 @@ class ExecutionAgent:
             if row is None:
                 continue  # shouldn't happen -- the route came from this same costs_df
 
-            edge_time = row.travel_time_s * (1.0 + self.rng.uniform(-TIME_JITTER_PCT, TIME_JITTER_PCT))
-
-            if self.rng.random() < row.delay_probability:
-                edge_time *= self.rng.uniform(*DELAY_EXTRA_TIME_RANGE)
-                num_delayed += 1
-
-            time_ratio = edge_time / row.travel_time_s if row.travel_time_s > 0 else 1.0
+            edge_time, edge_carbon, edge_ev, delayed = simulate_edge(row, self.rng)
+            num_delayed += delayed
             actual_time += edge_time
-            actual_carbon += row.carbon_kg * time_ratio
-            actual_ev += row.ev_energy_pct * time_ratio
+            actual_carbon += edge_carbon
+            actual_ev += edge_ev
 
         return {
             "actual_time_s": actual_time,

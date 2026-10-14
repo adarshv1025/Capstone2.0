@@ -1,0 +1,6 @@
+kind,trips,road_ahead_slowed,mean_slowdown_ahead,replanned,late_15pct_without_replan,late_15pct_with_loop,mean_min_without_replan,mean_min_with_loop,mean_min_saved_all_trips,mean_min_saved_when_replanned,mean_kg_saved_when_replanned,replans_that_ended_slower
+none,120,0.0,1.0,0.0,0.0,0.0,39.41,39.41,0.0,0.0,0.0,0.0
+incident,120,1.0,1.524,0.933,0.75,0.183,50.78,42.36,8.42,9.02,1.645,0.027
+rain,120,1.0,1.307,0.0,0.767,0.767,47.67,47.67,0.0,0.0,0.0,0.0
+surge,120,0.742,1.243,0.442,0.458,0.25,44.63,42.37,2.27,5.14,0.608,0.057
+update,80,0.5,0.947,0.0,0.012,0.012,43.37,43.37,0.0,0.0,0.0,0.0

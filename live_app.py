@@ -11,6 +11,10 @@ plus a traffic snapshot, a priority and a vehicle, and every click on
       -> the full 6-agent pipeline (agents/pipeline.run_full_pipeline)
       -> map + metrics + agent trace + baseline comparison
 
+and, for a planned route, "On the road" drives it through a change of
+conditions part-way and shows the closed loop re-planning (or not):
+agents/feedback_loop.py, CLAUDE.md 11.
+
 Nothing here re-implements agent logic; it only wires existing pieces to a UI.
 
 Needs (not in git, see README section in CLAUDE.md / Drive):
@@ -43,9 +47,11 @@ import folium  # noqa: E402
 import torch  # noqa: E402
 from streamlit_folium import st_folium  # noqa: E402
 
+from disruptions import apply_incident, edge_at_fraction, edges_near  # noqa: E402
 from gnn_inference import GNNCostPredictor  # noqa: E402
 from routing_solver import DELAY_EXTRA_TIME_RANGE, RoutingSolver, canonical_edges  # noqa: E402
 from schemas import DeliveryRequest, Vehicle  # noqa: E402
+from snapshot_disruptions import with_congestion_surge, with_rain  # noqa: E402
 
 CHECKPOINT_DIR = ROOT / "gnn_checkpoints_v3"
 SNAPSHOT_DIR = ROOT / "dataset_kaggle" / "test"
@@ -78,6 +84,32 @@ BASELINE_WEIGHTS = {
     "baseline_time_only": {"time": 1.0, "delay": 0.0, "carbon": 0.0, "ev": 0.0},
     "baseline_carbon_only": {"time": 0.0, "delay": 0.0, "carbon": 1.0, "ev": 0.0},
 }
+
+# "On the road": what can change after the vehicle leaves. The first is an
+# assumed slowdown (the GNN cannot model incidents); the next three are GNN
+# predictions on changed snapshot features. See agents/disruptions.py.
+CHANGE_KINDS = {
+    "A road incident ahead on the route": "incident",
+    "Heavy rain starts across the city": "rain",
+    "Traffic builds up on the route ahead": "surge",
+    "The next traffic update of the day arrives": "update",
+    "Nothing changes (control)": "none",
+}
+RULE_LABELS = {
+    "same_route": "a fixed rule: the planned route is still the best one from here",
+    "ev_range": "a fixed rule: the EV's remaining battery",
+    "dominated": "a fixed rule: the new route is no faster and no cleaner",
+    "small_gain": "a fixed rule: the gain is too small to turn a vehicle around for",
+    "policy": "a fixed rule: the gain is above the 5% threshold (LLM is off)",
+    "policy_fallback": "a fixed rule, because the LLM could not be reached",
+    "llm": "the LLM, weighing the change against the delivery's priority",
+    "not_informed": "nobody: the planner was never told",
+    "arrived": "nobody: the vehicle had already arrived",
+}
+# Map ink for "On the road". The route in use keeps the multi-agent blue;
+# what was driven and what was abandoned are neutral; red is the reserved
+# "critical" status colour and always comes with a warning marker.
+LOOP_COLORS = {"driven": "#52514e", "taken": "#2a78d6", "not_taken": "#898781", "incident": "#d03b3b"}
 
 # Same noise model as agents/execution_agent.py, used here only to turn the
 # per-segment delay probabilities into numbers a user can act on. The route-
@@ -189,6 +221,14 @@ def predict_costs(snapshot_file: str):
     t0 = time.perf_counter()
     costs = load_predictor().predict(snapshot)
     return costs, time.perf_counter() - t0
+
+
+@st.cache_data(show_spinner="Re-scoring every road with the GNN on the new conditions...", max_entries=16)
+def predict_changed(snapshot_file: str, kind: str, rows: tuple = ()):
+    """GNN costs for a snapshot with rain, or with congestion surged on `rows`."""
+    snapshot = torch.load(snapshot_file, weights_only=False)
+    changed = with_rain(snapshot) if kind == "rain" else with_congestion_surge(snapshot, rows)
+    return load_predictor().predict(changed)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -390,7 +430,116 @@ def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use
 
     return {"routes": routes, "trace": trace, "src": src, "dst": dst,
             "priority": priority, "is_ev": is_ev, "battery_kwh": battery_kwh,
-            "use_agents": use_agents, "algorithm": algorithm}
+            "use_agents": use_agents, "algorithm": algorithm, "seed": seed,
+            "token": time.time()}  # ties an "On the road" result to the plan it was run on
+
+
+def run_loop(plan, costs_df, snap_df, snap_row, kind, when, ahead, hops, slowdown, told):
+    """
+    Drives the planned route through a change of conditions `when` (0-1) of
+    the way into the trip. Returns the feedback-loop report plus what the
+    page needs to draw it.
+    """
+    from feedback_loop import ClosedLoopExecutor, fleet_learning  # imports litellm
+
+    path = plan["routes"]["multi_agent"]["path"]
+    weights = plan["trace"].get("final_weights") or plan["trace"]["weights"]
+    ce = canonical_edges(costs_df)
+    uv = list(zip(ce["src"].tolist(), ce["dst"].tolist()))
+    edge_time = dict(zip(uv, ce["travel_time_s"].tolist()))
+    row_of = dict(zip(uv, ce.index.tolist()))
+    where = when + ahead * (1.0 - when)   # share of the whole trip
+
+    blocked, basis = set(), "gnn"
+    if kind == "incident":
+        blocked = edges_near(costs_df, edge_at_fraction(path, edge_time, where), hops=hops)
+        after = apply_incident(costs_df, blocked, slowdown=slowdown)
+        event = (f"A road incident is reported ahead on the planned route; traffic around it is about "
+                 f"{slowdown:g} times slower.")
+        basis = "assumed"
+    elif kind == "rain":
+        after = predict_changed(snap_row["file"], "rain")
+        event = "Heavy rain has started across the city."
+    elif kind == "surge":
+        first = path.index(edge_at_fraction(path, edge_time, where)[0])
+        rows = tuple(row_of[e] for e in zip(path[first:-1], path[first + 1:]))
+        after = predict_changed(snap_row["file"], "surge", rows)
+        event = "Traffic has built up on the planned route ahead."
+    elif kind == "update":
+        later = snap_df[(snap_df["date"] == snap_row["date"]) & (snap_df["hour"] > snap_row["hour"])].sort_values("hour")
+        if later.empty:
+            return {"error": f"There is no later traffic snapshot on {snap_row['date']} (this is the last of the day). "
+                             "Pick an earlier snapshot in the sidebar."}
+        after, _ = predict_costs(later.iloc[0]["file"])
+        event = f"The {int(later.iloc[0]['hour']):02d}:00 traffic update has arrived."
+    else:
+        after, event, basis = costs_df, "Nothing has changed.", "none"
+
+    vehicle = Vehicle(vehicle_id="veh-live", is_ev=plan["is_ev"],
+                      battery_capacity_kwh=plan["battery_kwh"] if plan["is_ev"] else None)
+    report = ClosedLoopExecutor(costs_df, after, seed=plan["seed"], use_llm=plan["use_agents"], informed=told).run(
+        path, weights, priority=plan["priority"], vehicle=vehicle, disruption_after_fraction=when,
+        request_id="live-0", event=event)
+
+    fleet = None
+    if not told and report["disruption_reached"]:
+        learned = fleet_learning(costs_df, after, plan["src"], plan["dst"], weights, n_vehicles=5, seed=plan["seed"])
+        fleet = {"trips": learned["trips"], "flagged": len(learned["store"].corrections())}
+
+    def rows_of(p):
+        return [row_of[e] for e in zip(p[:-1], p[1:]) if e in row_of]
+
+    done = report["position"]["edges_done"]
+    alternative = report.get("alternative")
+    return {
+        "report": report, "kind": kind, "event": event, "basis": basis, "told": told, "fleet": fleet,
+        "slowdown": slowdown, "segments_scored": len(costs_df),
+        "driven_rows": rows_of(path[:done + 1]),
+        "planned_rest_rows": rows_of(path[done:]),
+        "new_rows": rows_of(alternative["path"]) if alternative else [],
+        "incident_rows": [row_of[e] for e in blocked if e in row_of],
+    }
+
+
+def build_loop_map(nodes_df, edge_geom, plan, loop):
+    report = loop["report"]
+    replanned = report["decision"]["replan"]
+    fmap = folium.Map(location=BENGALURU_CENTER, zoom_start=11, tiles="OpenStreetMap", control_scale=True)
+    bounds = draw_route(fmap, loop["driven_rows"], edge_geom, LOOP_COLORS["driven"], "Driven before the change", weight=6)
+    if replanned:
+        bounds += draw_route(fmap, loop["planned_rest_rows"], edge_geom, LOOP_COLORS["not_taken"],
+                             "Planned route, abandoned", weight=4, dash="6 8")
+        bounds += draw_route(fmap, loop["new_rows"], edge_geom, LOOP_COLORS["taken"], "New route, taken", weight=7)
+    else:
+        if loop["new_rows"]:
+            bounds += draw_route(fmap, loop["new_rows"], edge_geom, LOOP_COLORS["not_taken"],
+                                 "New route, offered but not taken", weight=4, dash="6 8")
+        bounds += draw_route(fmap, loop["planned_rest_rows"], edge_geom, LOOP_COLORS["taken"],
+                             "Planned route, kept", weight=7)
+
+    incident_points = []
+    for r in loop["incident_rows"]:
+        folium.PolyLine(edge_geom[r], color=LOOP_COLORS["incident"], weight=9, opacity=0.9,
+                        tooltip=f"Incident: traffic {loop['slowdown']:g} times slower").add_to(fmap)
+        incident_points += edge_geom[r]
+    if incident_points:
+        lat = sum(pt[0] for pt in incident_points) / len(incident_points)
+        lon = sum(pt[1] for pt in incident_points) / len(incident_points)
+        folium.Marker((lat, lon), tooltip=f"Incident: traffic {loop['slowdown']:g} times slower",
+                      icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa")).add_to(fmap)
+
+    for idx, color, icon, label in ((plan["src"], "green", "play", "Source"), (plan["dst"], "red", "flag", "Destination")):
+        row = nodes_df.iloc[idx]
+        folium.Marker((row.lat, row.lon), tooltip=f"{label}: {node_label(nodes_df, idx)}",
+                      icon=folium.Icon(color=color, icon=icon)).add_to(fmap)
+        bounds.append((row.lat, row.lon))
+    here = nodes_df.iloc[report["position"]["node"]]
+    folium.Marker((here.lat, here.lon),
+                  tooltip=f"The vehicle when conditions changed ({report['position']['elapsed_s'] / 60:.1f} min in)",
+                  icon=folium.Icon(color="blue", icon="truck", prefix="fa")).add_to(fmap)
+    if len(bounds) >= 2:
+        fmap.fit_bounds(bounds, padding=(30, 30))
+    return fmap
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -419,6 +568,7 @@ ss = st.session_state
 ss.setdefault("src", named_options.get("Koramangala Depot"))
 ss.setdefault("dst", named_options.get("Hebbal Logistics Park"))
 ss.setdefault("plan", None)
+ss.setdefault("loop", None)  # last "On the road" result; only shown for the plan it was run on
 ss.setdefault("last_click", None)
 # Widget state lives under these keys (no value=/index= on the widgets), so a
 # demo scenario can set all of them at once.
@@ -609,6 +759,152 @@ b1, b2 = st.columns(2)
 b1.bar_chart(chart_df[["Time (min)"]], horizontal=True, color=COLORS["multi_agent"])
 b2.bar_chart(chart_df[["CO₂ (kg)"]], horizontal=True, color=COLORS["baseline_carbon_only"])
 
+# ---- On the road: the closed loop -------------------------------------------
+st.subheader("On the road: what if conditions change after the vehicle leaves?")
+st.caption(
+    "The route above was planned on one traffic snapshot. Here the vehicle drives it, conditions change part-way, "
+    "and the Execution agent decides whether to re-plan from where the vehicle is. There is no live traffic feed "
+    "in this project, so a change is a second set of road costs: either the GNN re-scoring the roads on changed "
+    "conditions, or (for an incident, which the GNN cannot model) an assumed slowdown."
+)
+with st.form("loop_form"):
+    f1, f2, f3 = st.columns([3, 2, 2])
+    loop_kind = CHANGE_KINDS[f1.selectbox("What happens", list(CHANGE_KINDS))]
+    loop_when = f2.slider("When, as a share of the trip driven", 10, 80, 30, step=5, format="%d%%")
+    loop_told = f3.toggle("Tell the planner", value=True,
+                          help="On: the planner gets the new conditions and may re-plan this trip. Off: nobody "
+                               "tells it; the vehicle finishes its plan and the following vehicles have to learn "
+                               "the problem from its telemetry.")
+    g1, g2, g3 = st.columns(3)
+    loop_ahead = g1.slider("How far ahead of the vehicle", 10, 90, 50, step=5, format="%d%%",
+                           help="Incident and traffic build-up only: where it is, as a share of the trip still to drive.")
+    loop_hops = g2.slider("Incident size (junctions around it)", 0, 3, 1,
+                          help="Incident only. 0 = one road segment; each step adds the neighbouring junctions.")
+    loop_slowdown = g3.slider("Incident slowdown", 2.0, 8.0, 4.0, step=0.5, format="x%.1f",
+                              help="Incident only: how many times slower traffic is around it (an assumption).")
+    drive_now = st.form_submit_button("🚚 Drive the trip", type="primary")
+
+if drive_now:
+    with st.spinner("Driving the trip..."):
+        try:
+            ss.loop = run_loop(plan, costs_df, snap_df, snap_row, loop_kind, loop_when / 100, loop_ahead / 100,
+                               int(loop_hops), float(loop_slowdown), loop_told)
+        except Exception as e:  # rate limits etc. -- show, don't crash the app
+            ss.loop = {"error": f"{type(e).__name__}: {str(e)[:600]}"}
+        ss.loop["token"] = plan["token"]
+
+loop = ss.loop if ss.loop and ss.loop.get("token") == plan["token"] else None
+if loop and "error" in loop:
+    st.warning(loop["error"])
+elif loop:
+    rep = loop["report"]
+    decision, position = rep["decision"], rep["position"]
+    promised_min = rep["promised"]["expected_time_s"] / 60
+    outcome, other = rep["outcome"], rep["counterfactual"]
+
+    if not rep["disruption_reached"]:
+        st.info(f"The vehicle arrived after {outcome['actual_time_s'] / 60:.1f} min, before anything changed.")
+    else:
+        where_now = (f"{position['elapsed_s'] / 60:.1f} min into the trip, after {position['edges_done']} of "
+                     f"{position['edges_total']} road segments")
+        if decision["replan"]:
+            st.success(f"**Re-planned.** {loop['event']} The vehicle was {where_now}.", icon="🔁")
+        else:
+            st.info(f"**Kept the planned route.** {loop['event']} The vehicle was {where_now}.", icon="➡️")
+        st.markdown(f"**Decided by** {RULE_LABELS.get(decision['rule'], decision['rule'])}.  \n{decision['reasoning']}")
+
+        kept = other if decision["replan"] else outcome   # what finishing the plan gives
+        k = st.columns(4)
+        k[0].metric("Promised at departure", f"{promised_min:.1f} min",
+                    help="The plan's expected time including typical delays.")
+        k[1].metric("Finishing the planned route", f"{kept['actual_time_s'] / 60:.1f} min",
+                    f"{kept['actual_time_s'] / 60 - promised_min:+.1f} min vs promised", delta_color="inverse")
+        if decision["replan"]:
+            k[2].metric("With the re-plan", f"{outcome['actual_time_s'] / 60:.1f} min",
+                        f"{-rep['saved']['time_s'] / 60:+.1f} min", delta_color="inverse")
+            k[3].metric("CO₂ for the whole trip", f"{outcome['actual_carbon_kg']:.2f} kg",
+                        f"{-rep['saved']['carbon_kg']:+.2f} kg", delta_color="inverse")
+        else:
+            if other:
+                k[2].metric("Had it switched instead", f"{other['actual_time_s'] / 60:.1f} min",
+                            f"{(other['actual_time_s'] - outcome['actual_time_s']) / 60:+.1f} min",
+                            delta_color="inverse")
+            k[3].metric("CO₂ for the whole trip", f"{outcome['actual_carbon_kg']:.2f} kg")
+
+        notes = []
+        if loop["basis"] == "assumed":
+            notes.append(f"The incident is an assumption (traffic {loop['slowdown']:g} times slower on "
+                         f"{len(loop['incident_rows'])} road segments), not a GNN prediction: the GNN cannot model "
+                         "incidents.")
+        elif loop["basis"] == "gnn":
+            notes.append(f"The new conditions are GNN predictions: the snapshot was changed and all "
+                         f"{loop['segments_scored']:,} road segments were scored again.")
+        notes.append(f"On the new conditions the rest of the planned route is expected to take "
+                     f"{rep['slowdown_ahead']:.2f} times as long as when it was planned.")
+        if loop["kind"] == "surge" and rep["slowdown_ahead"] < 1.03:
+            notes.append("Traffic on this route is already close to the maximum the data contains at this hour, so "
+                         "a build-up changes almost nothing. Try a 13:00 or 21:00 snapshot.")
+        if other:
+            notes.append("Both arrival times are simulated drives with the same luck on every road they share, so "
+                         "the difference between them is the effect of the decision.")
+        st.caption(" ".join(notes))
+
+        if plan["is_ev"]:
+            used_kwh = outcome["actual_ev_energy_pct"] / 100 * EV_REFERENCE_KWH
+            (st.error if outcome["ev_violation"] else st.success)(
+                f"EV energy used on this drive: {used_kwh:.2f} kWh of a {plan['battery_kwh']:.1f} kWh battery"
+                + (" — the battery ran out." if outcome["ev_violation"] else "."))
+
+        st_folium(build_loop_map(nodes_df, edge_geom, plan, loop), height=440, use_container_width=True,
+                  returned_objects=[], key="loop_map")
+        taken_label = "new route, taken" if decision["replan"] else "planned route, kept"
+        other_label = "planned route, abandoned" if decision["replan"] else "new route, offered but not taken"
+        st.markdown(
+            f"<span style='color:{LOOP_COLORS['driven']};font-weight:600'>━</span> driven before the change &nbsp; "
+            f"<span style='color:{LOOP_COLORS['taken']};font-weight:600'>━</span> {taken_label} &nbsp; "
+            f"<span style='color:{LOOP_COLORS['not_taken']};font-weight:600'>┅</span> {other_label} &nbsp; "
+            f"<span style='color:{LOOP_COLORS['incident']};font-weight:600'>━</span> ⚠ incident &nbsp; "
+            "🚚 the vehicle when conditions changed", unsafe_allow_html=True)
+
+    with st.expander("Telemetry: what the vehicle reported, segment by segment"):
+        tel = pd.DataFrame(rep["telemetry"])
+        tel["Segment"] = tel["src"].astype(str) + " → " + tel["dst"].astype(str)
+        tel["Actual / expected"] = tel["actual_time_s"] / tel["expected_time_s"].where(tel["expected_time_s"] > 0)
+        st.dataframe(
+            tel.rename(columns={"phase": "When", "expected_time_s": "Expected (s)", "actual_time_s": "Actual (s)",
+                                "delayed": "Delayed"})[
+                ["When", "Segment", "Expected (s)", "Actual (s)", "Actual / expected", "Delayed"]
+            ].style.format({"Expected (s)": "{:.1f}", "Actual (s)": "{:.1f}", "Actual / expected": "{:.2f}"}),
+            width="stretch", hide_index=True)
+        st.caption("Expected is what the planner believed at the time, typical delays included. This is the record "
+                   "the long feedback loop learns from.")
+
+    if loop["fleet"]:
+        st.markdown("**Nobody told the planner — what the next vehicles on this same trip do**")
+        trips = loop["fleet"]["trips"]
+        st.dataframe(
+            pd.DataFrame({
+                "Vehicle": [t["vehicle"] for t in trips],
+                "Road segments already flagged from telemetry": [t["segments_corrected_before_planning"] for t in trips],
+                "Route": ["original plan" if t["same_as_no_feedback"]
+                          else ("same as a fully informed planner" if t["same_as_informed"] else "a new route")
+                          for t in trips],
+                "Trip time (min)": [t["actual_time_s"] / 60 for t in trips],
+                "Same drive without feedback (min)": [t["no_feedback_time_s"] / 60 for t in trips],
+                "Same drive, planner fully informed (min)": [t["informed_time_s"] / 60 for t in trips],
+            }).style.format({"Trip time (min)": "{:.1f}", "Same drive without feedback (min)": "{:.1f}",
+                             "Same drive, planner fully informed (min)": "{:.1f}"}),
+            width="stretch", hide_index=True)
+        later = trips[1:]
+        gained = sum(t["no_feedback_time_s"] - t["actual_time_s"] for t in later) / max(len(later), 1) / 60
+        st.caption(
+            "Each vehicle reports how long every segment actually took. A segment that takes far longer than "
+            "predicted gets a correction factor, and the next vehicle is planned on the corrected costs. "
+            f"After this run {loop['fleet']['flagged']} segments carry a correction; vehicles 2 to {len(trips)} "
+            f"averaged {gained:+.1f} min against the same drives on the never-corrected plan"
+            + (" (nothing was learned: the slowdown is inside what ordinary delays explain)."
+               if not loop["fleet"]["flagged"] else "."))
+
 # ---- Shortest-path algorithms ----------------------------------------------
 st.subheader("Shortest-path search: Dijkstra vs Tsinghua BMSSP")
 alg = trace["algorithms"]
@@ -756,6 +1052,8 @@ if plan["use_agents"]:
             if rep.get("hard_ev_violation"):
                 st.error("Simulated EV energy exceeds the battery — hard re-plan.")
             st.caption(rep.get("reasoning") or "Deviation within normal variance; no LLM review needed.")
+        st.caption("This flag is raised after the whole simulated trip is over. To see a re-plan happen while the "
+                   "vehicle is still driving, use “On the road” above.")
     with st.expander("⑤ ESG Reporter", expanded=True):
         st.write(trace["esg"].get("summary") or "(narrative unavailable)")
         with st.popover("Raw ESG metrics"):
