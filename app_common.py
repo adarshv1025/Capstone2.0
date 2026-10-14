@@ -1,8 +1,8 @@
 """
 app_common.py
 
-Pieces shared by the Streamlit pages: live_app.py (single delivery, the
-closed loop, the algorithm comparison) and pages/1_Multi-stop_fleet_planner.py (several
+Pieces shared by the Streamlit pages: app_pages/single_delivery.py (single
+delivery, the closed loop, the algorithm comparison) and app_pages/fleet_rounds.py (several
 deliveries per vehicle, OR-Tools). Defined once here so both pages share
 one GNN, one road graph and one set of caches.
 """

@@ -18,6 +18,25 @@ since the original two commits.
 
 ---
 
+## 14 Oct 2026 — The two app pages named clearly
+
+- **What:** `streamlit run live_app.py` now opens a sidebar with two clearly
+  named pages: **Single delivery: source → destination** (the original page,
+  with "On the road" disruptions and the algorithm comparison; opens by
+  default) and **Multi-stop fleet planner**. Each page links to the other.
+- **Why:** adding the second page made Streamlit list the original one only
+  as "live app" (its file name), so it looked as if the source/destination
+  planner and the disruption controls had disappeared.
+- **Files:** `live_app.py` is now only the entry point that lists the pages
+  (`st.navigation`); the page code moved to `app_pages/single_delivery.py`
+  (was `live_app.py`) and `app_pages/fleet_rounds.py` (was
+  `pages/1_Multi-stop_fleet_planner.py`). Same command to run the app.
+- **Checked by:** automated checks through the entry point: 15 of 15 for the
+  Phase 5 features on both pages and 150 of 150 for "On the road"; the
+  sidebar viewed in the browser.
+
+---
+
 ## 14 Oct 2026 — Phase 5: vehicle types, deadlines, multi-stop, distributed runtime
 
 Details, sources and full tables: `CLAUDE.md` section 12.

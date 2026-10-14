@@ -1,8 +1,8 @@
 """
-pages/1_Multi-stop_fleet_planner.py
+app_pages/fleet_rounds.py  (the "Multi-stop fleet planner" page)
 
-(Not named multi_stop.py: the pages/ folder is on the import path when the
-page runs, and that name would shadow agents/multi_stop.py.)
+(Deliberately not named multi_stop.py: a page module with that name shadowed
+agents/multi_stop.py when it lived in Streamlit's pages/ folder.)
 
 Second page of the Streamlit app: several deliveries per vehicle, planned
 with OR-Tools (agents/multi_stop.py, CLAUDE.md 12.4). Pick a depot, a few
@@ -149,6 +149,12 @@ if go:
 
 # ---- Header ------------------------------------------------------------------
 st.title("Multi-stop fleet planner")
+try:
+    st.page_link("app_pages/single_delivery.py",
+                 label="One delivery from a source to a destination, disruptions on the road and the "
+                       "algorithm comparison are on the Single delivery page", icon="🚚")
+except Exception:  # page run on its own (not through live_app.py)
+    pass
 st.caption(
     f"Live GNN v3 inference on **{snap_label}** ({infer_s * 1000:.0f} ms). Several deliveries per vehicle: OR-Tools "
     "decides which vehicle takes which drop-offs and in what order, within each vehicle's payload, battery and the "

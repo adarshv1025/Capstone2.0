@@ -1018,6 +1018,11 @@ in — worth reading both stages, not just the ending:**
   alone suggests.
 ## 5. Live interactive planner — `live_app.py`
 
+(Since 2026-10-14 `live_app.py` only lists the pages; this page's code is
+`app_pages/single_delivery.py`, and the multi-stop page is
+`app_pages/fleet_rounds.py` -- see 12.7. References to `live_app.py` below
+and in sections 6-11 mean the single-delivery page.)
+
 Streamlit upgrade of the static dashboard (4.3's "upgrade to a small
 Streamlit app" follow-up). User picks source/destination on a Leaflet map
 of Bengaluru (or one of the 13 named depots / BESCOM EV stations), a
@@ -2102,10 +2107,18 @@ edge-cloud deployment in the Review 1 abstract is future work (12.6).
 
 New: `agents/vehicles.py`, `agents/multi_stop.py`,
 `agents/multi_stop_experiment.py`, `agents/cluster.py`,
-`agents/cluster_benchmark.py`, `app_common.py`,
-`pages/1_Multi-stop_fleet_planner.py` (not `multi_stop.py`: the pages/
-folder is on the import path when a page runs and that name shadowed
-`agents/multi_stop.py`), `tests/test_fleet.py`, `tests/test_cluster.py`.
+`agents/cluster_benchmark.py`, `app_common.py`, the multi-stop page,
+`tests/test_fleet.py`, `tests/test_cluster.py`.
+
+App layout (final, 2026-10-14): `live_app.py` is the entry point and only
+lists two pages with `st.navigation`: "Single delivery: source ->
+destination" (`app_pages/single_delivery.py`, the former `live_app.py`,
+default) and "Multi-stop fleet planner" (`app_pages/fleet_rounds.py`). The
+first attempt put the second page in Streamlit's `pages/` folder, which (a)
+listed the original page only as "live app", so it looked missing, and (b)
+as `pages/multi_stop.py` shadowed `agents/multi_stop.py` on the import path.
+Test the app through `live_app.py` (AppTest `switch_page` for the second
+page): `st.page_link` between the pages needs the page list.
 Changed: schemas, all six agents' modules except the ESG narrative, the
 pipeline, the feedback loop, the re-plan experiment, `live_app.py`,
 `requirements.txt` (+ ortools, dask[distributed]).
