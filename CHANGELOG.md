@@ -18,6 +18,63 @@ since the original two commits.
 
 ---
 
+## 14 Oct 2026 — Phase 5: vehicle types, deadlines, multi-stop, distributed runtime
+
+Details, sources and full tables: `CLAUDE.md` section 12.
+
+- **Vehicle-specific carbon** (`agents/vehicles.py`, `Vehicle.vehicle_type`): 6 types. Combustion
+  factors from the India GHG Program (2015): diesel LDV 0.307, MDV 0.593, diesel 3W 0.132, CNG 3W
+  0.108, petrol scooter 0.033 kg CO2/km, against the GNN's 0.27 reference. EV CO2 = kWh x 0.727
+  (CEA v20.0, FY 2023-24). `FleetCosts` routes each request on its vehicle's own costs: combustion
+  routes never change (300 of 300 identical), EV routes change in 7-47% of trips. Untyped vehicles
+  behave exactly as before. Dispatcher prefers a cleaner vehicle (600 s per kg CO2) only when the
+  fleet has types.
+- **Deadlines** (`deadline_s` = seconds after leaving the origin): Coordinator moves weights toward
+  time-only in 25% steps until met; Carbon Optimizer hard rule (seen live: the LLM accepted a greener
+  swap, the rule rejected it for the deadline); Execution `deadline_met`; ESG `deadline_met_rate`;
+  closed-loop `deadline` rule.
+- **Multi-stop with OR-Tools** (`agents/multi_stop.py`, `DispatcherAgent.plan_tours`): payload, time
+  windows, battery; baselines nearest-neighbour and one trip per delivery. 20 rounds x 10 stops
+  (`multi_stop_experiment.py`): mixed fleet, greenest: 18.1 kg / 260 min vs nearest-neighbour 31.5
+  kg / 271 min (59 of 100 deadlines) vs separate trips 57.4 kg / 583 min; all-diesel fleet 37.5 kg,
+  so the mixed fleet halves CO2. Deadlines 100/100 expected, 97-99/100 in simulated drives.
+- **Distributed runtime** (`agents/cluster.py`, Dask): worker processes over TCP, local or on other
+  machines. `cluster_benchmark.py`, same answers every time: GNN on 381 snapshots 43.8 s serial,
+  x1.20 on 2 workers, x1.54 on 4 (R2 0.9488/0.9687/0.9431/0.9445 reproduced); re-plan experiment
+  120 trips 304 s serial, 145 s on 4 workers (x2.09). `replan_experiment.py --workers N`.
+  Bug fixed: `client.close()` left local workers running (now `release()`). Not tested on 2 machines.
+- **Label check / correction:** on test snapshots the time label rule holds on 97% of segments,
+  carbon 95%, EV 100%. Segments with `event_disruption` > 0 are labelled ~25% FASTER, so the GNN's
+  incident response follows the data (corrected in CLAUDE.md 11.3 and both disruption modules).
+- **App:** vehicle selector and deadline input on the main page; new page
+  `pages/1_Multi-stop_fleet_planner.py`; shared loaders moved to `app_common.py`.
+- **Tests:** `tests/test_fleet.py` 11/11, `tests/test_cluster.py` 2/2 (separate scheduler and
+  workers over TCP), `test_feedback_loop.py` 16/16, `test_bmssp.py` 6/6; app checks pass on both
+  pages; one full LLM pipeline run with vehicle types and a deadline.
+- **Requirements:** `ortools`, `dask[distributed]`.
+- **Future work, written up for the guide to confirm** (`CLAUDE.md` 12.6): Neo4j, LangGraph,
+  30-second live rebuild (computation takes ~0.12 s per snapshot; the missing piece is live
+  data), GNN retraining from telemetry, edge-cloud deployment.
+- **Docs:** `CLAUDE.md` section 12 (and plan item 5 marked done), `README.md`.
+
+---
+
+## 14 Oct 2026 — Disruption controls easier to find
+
+### Live app: pointers to "On the road"
+- **What:** the sidebar has a new item "5 · Disruption on the road" that
+  says where the disruption controls are, with a link; after a route is
+  planned, a note under the headline figures links to the same place; the
+  section heading has the anchor `#on-the-road`.
+- **Why:** the controls for introducing a disruption mid-trip are in the
+  main page, below the baseline comparison, and only appear after "Plan
+  route". Looking in the sidebar, they could not be found.
+- **Files:** `live_app.py`.
+- **Checked by:** in the browser: the sidebar item and the note appear, and
+  the link jumps to the section.
+
+---
+
 ## 13 Oct 2026 — Phase 4: the closed feedback loop
 
 Details, measurements and the full results tables: `CLAUDE.md` section 11.
@@ -500,13 +557,17 @@ Details: `CLAUDE.md` section 5.
 - **13 Oct 2026:** a road incident is modelled as an assumed slowdown, not
   through the GNN, because the GNN predicts incident roads to be faster
   (`CLAUDE.md` 11.3). Always present it as an assumption.
+- **14 Oct 2026:** Phase 5 built in full (the user asked for all of it).
+  Neo4j, LangGraph, the 30-second rebuild, retraining from telemetry and
+  edge-cloud deployment are written up as future work; the guide still has
+  to confirm that scope.
 
 ## What comes next
 
-Phases 1 to 4 of the plan in `CLAUDE.md` section 8.2 are done. Next is
-Phase 5: settle the remaining promises with the guide (the word
-"distributed" in the title, a small multi-stop version, vehicle-specific
-carbon, delivery deadlines), then the Review 3 package, then the paper work.
+Phases 1 to 5 of the plan in `CLAUDE.md` section 8.2 are done. Next is
+Phase 6, the Review 3 package (deck with the Review 1 -> current agent
+mapping, corrected claims, audit, Tsinghua benchmark, the loop, Phase 5 and
+the scope statement in 12.6), then the paper work (Phases 7-10).
 
 ## Commits
 
@@ -522,4 +583,6 @@ carbon, delivery deadlines), then the Review 3 package, then the paper work.
 | `8b14c12` | 13 Oct | Live app: algorithm selector, Dijkstra vs BMSSP comparison panel, two-row headline figures. |
 | `2fc4eff` | 13 Oct | Change log, `CLAUDE.md` section 10 and `README.md` for Phase 3 and the comparison panel. |
 | `22013bf` | 14 Oct | Phase 4 code: closed feedback loop, disruption models, solver additions, re-plan experiment and results, app "On the road" section, tests. |
-| the commit after `22013bf` | 14 Oct | Change log, `CLAUDE.md` section 11 and `README.md` for Phase 4. |
+| `dfa4f6b` | 14 Oct | Change log, `CLAUDE.md` section 11 and `README.md` for Phase 4. |
+| `91e5f33` | 14 Oct | Phase 5 code: vehicle types, deadlines, OR-Tools multi-stop, Dask runtime, experiments and results, app page and controls, tests. |
+| the commit after `91e5f33` | 14 Oct | Change log, `CLAUDE.md` section 12 (and the 11.3 correction), `README.md` for Phase 5. |

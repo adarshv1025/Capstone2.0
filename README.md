@@ -21,10 +21,10 @@ traffic snapshot -> GNN (per-road costs) -> Dispatcher -> Route Agents
 
 | Agent | File | Uses the LLM? | Job |
 |---|---|---|---|
-| Dispatcher | `agents/dispatcher_agent.py` | No | Assigns each delivery to the nearest capable vehicle |
+| Dispatcher | `agents/dispatcher_agent.py`, `agents/multi_stop.py` | No | Assigns each delivery to the nearest capable vehicle (a cleaner one when vehicle types are known); plans multi-stop rounds with OR-Tools |
 | Route Agent | `agents/route_agent.py` | Yes | Turns a priority ("fastest", "greenest", free text) into solver weights |
-| Coordinator | `agents/coordinator_agent.py` | On conflicts | Resolves overloaded roads and EV range violations |
-| Carbon Optimizer | `agents/carbon_optimizer_agent.py` | Yes | Proposes greener routes; code verifies the saving before accepting |
+| Coordinator | `agents/coordinator_agent.py` | On conflicts | Resolves overloaded roads, EV range and deadline violations |
+| Carbon Optimizer | `agents/carbon_optimizer_agent.py` | Yes | Proposes greener routes; code verifies the saving and the deadline before accepting |
 | Execution | `agents/execution_agent.py`, `agents/feedback_loop.py` | When rules do not settle it | Simulates the drive with delays; re-plans mid-trip when conditions change |
 | ESG Reporter | `agents/esg_reporter_agent.py` | Yes (summary) | Aggregates metrics and writes a short report |
 
@@ -32,16 +32,21 @@ The road graph has 7,095 junctions and 15,083 road segments. Routing is a
 weighted shortest-path search (`gnn/routing_solver.py`) over the GNN's
 predicted costs. Two search algorithms are available: Dijkstra (default) and
 the Duan et al. 2025 "Tsinghua" algorithm (`gnn/bmssp.py`, see below).
+Each vehicle is routed on its own costs: six vehicle types with sourced
+emission factors (`agents/vehicles.py`), or the GNN's reference vehicle.
 
 ## Repository layout
 
 ```
 gnn/                 GNN model, trainer, inference wrapper, routing solver, BMSSP solver and its benchmark
-tests/               tests that need no LLM (the BMSSP solver, the feedback loop)
-agents/              the six agents, pipeline, feedback loop, evaluation harness, static dashboard
-agents/evaluation_results/   raw and summary evaluation CSVs, re-plan experiment results
+tests/               tests that need no LLM (BMSSP, feedback loop, fleet features, distributed runtime)
+agents/              the six agents, pipeline, feedback loop, vehicle types, multi-stop planner,
+                     distributed runtime, experiments, evaluation harness, static dashboard
+agents/evaluation_results/   evaluation, re-plan, multi-stop and benchmark results (CSV)
 sample_costs/        GNN predictions for 5 snapshots (CSV), for running agents without PyTorch
 live_app.py          interactive Streamlit planner (map, live GNN, agent trace)
+pages/               the app's second page: multi-stop fleet planner
+app_common.py        loaders and helpers shared by the two app pages
 CLAUDE.md            full design log, findings and the measured audit (section 7)
 CHANGELOG.md         every change and fix since 27 Sep 2026, newest first
 ```
@@ -84,9 +89,15 @@ No API key needed:
 python agents/dispatcher_agent.py        # vehicle assignment smoke test
 python tests/test_bmssp.py               # Tsinghua solver vs Dijkstra (or: pytest tests/)
 python tests/test_feedback_loop.py       # the closed loop: re-planning and learning from telemetry
+python tests/test_fleet.py               # vehicle types, deadlines, carbon-aware dispatch, multi-stop
+python tests/test_cluster.py             # distributed runtime: scheduler + 2 workers as separate processes
 python agents/feedback_loop.py           # one trip through an incident, reported and not reported
+python agents/multi_stop.py              # a mixed fleet and ten drop-offs, OR-Tools vs baselines
+python agents/multi_stop_experiment.py   # 20 rounds x 10 drop-offs, diesel vs mixed fleet (~4 min)
 python gnn/benchmark_sssp.py --quick     # Dijkstra vs Tsinghua solver timings (drop --quick for the full run)
-python agents/replan_experiment.py       # re-plan vs no re-plan on 120 trips (needs the Drive data, ~7 min)
+python agents/replan_experiment.py       # re-plan vs no re-plan on 120 trips (needs the Drive data, ~5 min)
+python agents/replan_experiment.py --workers 4   # the same on 4 worker processes
+python agents/cluster_benchmark.py       # serial vs 1/2/4 workers, GNN scoring and re-plan trips
 ```
 
 Needs the LLM key:
@@ -110,6 +121,10 @@ Pick a source and destination on the map (or a demo scenario from the
 sidebar), choose the traffic snapshot, priority and vehicle, and press
 **Plan route**. Switching off "Use multi-agent LLM pipeline" plans instantly
 with fixed weights and uses no tokens.
+
+The sidebar also takes a vehicle type and an optional deadline. A second
+page, **Multi-stop fleet planner** (sidebar navigation), plans a delivery
+round for up to three vehicles with OR-Tools.
 
 Under every planned route, **On the road** drives the trip through a change
 of conditions (a road incident, rain, a traffic build-up, the next traffic
@@ -161,6 +176,40 @@ vehicle's route on purpose. When an incident is never reported, the second
 vehicle on the same trip already takes the route a fully informed planner
 would in 68% of cases. `CLAUDE.md` section 11 has the details.
 
+## Vehicles, deadlines and multi-stop rounds
+
+- **Vehicle types** (`agents/vehicles.py`): diesel light goods vehicle and
+  medium truck, diesel and CNG three-wheelers, petrol scooter (India GHG
+  Program, 2015) and an electric light goods vehicle (its electricity x the
+  CEA grid factor, 0.727 kg CO2/kWh, FY 2023-24). Carbon figures for a typed
+  vehicle are its own: tailpipe, or grid electricity for an EV.
+- **Deadlines** are hard: the Coordinator speeds a route up just enough to
+  meet one, the Carbon Optimizer never trades one for carbon, and the
+  Execution and ESG agents report whether it was met.
+- **Multi-stop rounds** (`agents/multi_stop.py`, OR-Tools): which vehicle
+  takes which drop-offs and in what order, within payload, battery and
+  deadlines. On 20 rounds of 10 drop-offs: met 100 of 100 deadlines in plan
+  (nearest-neighbour heuristic: 59), half the driving of one trip per
+  delivery, and a mixed fleet (EV, diesel, CNG three-wheeler) emitted 52%
+  less CO2 than three diesel vehicles for about 1% more time.
+
+## Distributed runtime
+
+`agents/cluster.py` runs the heavy jobs on Dask worker processes
+coordinated by a scheduler over TCP; the workers can be on other machines.
+Every distributed run gives the same answers as a single process. On this
+laptop (12 cores): GNN scoring of all 381 test snapshots 1.54x faster on 4
+workers; the 120-trip re-plan experiment 2.09x faster (304 s to 145 s).
+Tested with separate processes on one machine, not across two machines.
+
+## Scope
+
+Built: everything above. Written up as future work, for the guide to
+confirm: a Neo4j graph database, LangGraph orchestration, a 30-second live
+graph rebuild (the GNN re-scores a snapshot in about 0.12 s; the missing
+piece is a live data feed), GNN retraining from telemetry, and an
+edge-cloud deployment. `CLAUDE.md` section 12.6 gives the reasons.
+
 ## The Tsinghua shortest-path algorithm
 
 `gnn/bmssp.py` is our implementation of R. Duan, J. Mao, X. Mao, X. Shu and
@@ -183,8 +232,8 @@ section 10 lists the three places the code differs from the paper.
 - There is no live traffic feed; the system runs on recorded snapshots, and
   a mid-trip change is simulated (GNN re-scoring, or an assumed slowdown for
   incidents).
-- The GNN cannot model a road incident: its incident feature was never
-  learned and pushes predictions the wrong way.
+- The GNN cannot model a road incident: in its training labels, roads
+  flagged with an incident are about 25% faster, and it learned exactly that.
 - A linear model on the raw road features matches or beats the GNN on three
   of the four targets; the GNN is ahead only on delay probability.
 - The lowest-carbon baseline is both faster and greener than the multi-agent
@@ -195,8 +244,14 @@ section 10 lists the three places the code differs from the paper.
   the GNN.
 - In the re-plan decision the LLM has so far agreed with the fixed rule
   every time (16 of 16).
-- Not implemented: multi-stop routing, delivery deadlines, vehicle-specific
-  carbon, distributed execution, automated tests beyond `tests/`.
+- Travel time is the same for every vehicle type (the GNN has one time per
+  road); combustion CO2 is tailpipe only, EV CO2 is electricity at the
+  power station without transmission or charging losses.
+- The multi-stop planner minimises total time and CO2, not the time the
+  last parcel arrives; it is meant for tens of stops.
+- The distributed runtime is tested on one machine only; LLM calls are not
+  distributed.
+- No pytest installation or CI yet (Phase 9); the tests run as scripts.
 
 `CLAUDE.md` section 7 has the full audit, per-stage completion scores and the
 list of known defects.

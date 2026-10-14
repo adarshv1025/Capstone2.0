@@ -1279,11 +1279,12 @@ Before Review 3:
    15%+ late) and correctly does nothing for city-wide ones (rain, next
    snapshot). Justification for having no live feed: trace-driven
    simulation on recorded snapshots, with a swappable snapshot source.
-5. **Settle remaining promises with the guide:** "distributed" (worker
-   processes or change the title); small OR-Tools multi-stop version;
-   vehicle-specific carbon; delivery deadlines. State as out of scope /
-   future work: Neo4j, LangGraph, 30-second live rebuild, GNN retraining
-   from feedback.
+5. **Settle remaining promises — DONE 2026-10-14, see 12.** Built: a
+   distributed runtime (Dask worker processes over TCP), a small OR-Tools
+   multi-stop planner, vehicle-specific carbon, delivery deadlines. Written
+   up as future work (12.6), for the guide to confirm: Neo4j, LangGraph,
+   30-second live rebuild, GNN retraining from feedback, edge-cloud
+   deployment.
 6. **Review 3 package:** deck (mapping slide from Review 1 agent names to
    the current six, corrected data claims, measured audit, Tsinghua
    benchmark, loop demo, scope statement) and rehearsed demo scenarios.
@@ -1674,17 +1675,22 @@ model says how the roads respond. Measured on the 2024-06-24 snapshots:
 
 Caveats: rain is rare in training (`weather_impact` mean 0.013, s.d. 0.073)
 and absent from the test split (373 Clear, 8 Overcast), so the rain response
-cannot be checked against labelled rain data here. A surge has no effect at
-rush hour because congestion is already at the top of its range.
+cannot be checked against labelled rain data here. (Added 2026-10-14, 12.1: it
+does match the rule that generated the travel-time labels, x1.19.) A surge
+has no effect at rush hour because congestion is already at the top of its
+range.
 
 **World-level**: `apply_incident()` multiplies time, carbon and EV energy on
 the affected edges by a stated factor (default 4) and raises their delay
 probability to at least 0.9. This is an **assumption, not a prediction**. It
 exists because **the GNN cannot model an incident**: raising
 `event_disruption` to 0.6 or 1.0 on a route's edges made it predict those
-edges 10-24% *faster* and less likely to be delayed (time x0.76-0.90). That
-feature is non-zero on 1.5% of edges and was never learned (7.2). Do not
-route incidents through the GNN; say "we assume a 4x slowdown".
+edges 10-24% *faster* and less likely to be delayed (time x0.76-0.90).
+**Corrected 2026-10-14 (12.1):** this is not a training failure. In the
+labels themselves, segments with `event_disruption` > 0 take about 25% *less*
+time than the rule that sets the other 97% of segments, so the GNN learned
+what the data says. In this dataset an incident flag does not mean a slower
+road. Do not route incidents through the GNN; say "we assume a 4x slowdown".
 
 ### 11.4 The re-plan decision
 
@@ -1873,7 +1879,253 @@ promised 22.3 min; finishing the plan 33.3 min; with the re-plan 25.0 min
 (-8.3 min, -1.31 kg CO2); decided by the LLM ("Switch saves about 9
 minutes, aligning with fastest priority").
 
+Finding it (added 2026-10-14): the controls are in the main page and only
+appear after "Plan route", so the sidebar has an item "5 · Disruption on the
+road" and the page a note under the headline figures, both linking to the
+section's anchor `#on-the-road`.
+
 A result is tied to the plan it was run on (`plan["token"]`) and disappears
 when a new route is planned. GNN re-scoring for rain and surge is cached
 (`predict_changed`). As before, restart Streamlit after changing anything
 under `gnn/` or `agents/`.
+
+## 12. Phase 5 — vehicle types, deadlines, multi-stop rounds, distributed runtime (2026-10-14)
+
+The four items from the Review 1 deck and title still open after Phase 4:
+"vehicle type (EV vs diesel) in the routing objective", "OR-Tools CVRP with
+carbon + EV constraints", delivery deadlines, and "over Distributed Computing
+Systems". The six agents are unchanged in number; each item extends one.
+
+### 12.1 What the training labels are made of (checked on the test snapshots)
+
+The rules quoted in the teammate's shared chat were checked against the
+labels on 10 test snapshots (every 40th):
+
+| Label | Rule | Holds exactly on |
+|---|---|---|
+| travel time | base_time x (1 + congestion) x (1 + 0.3 weather) x (1 + 0.2 (1 - road condition)) | 97% of segments |
+| carbon | base_carbon x (1 + 0.4 congestion) x (1 + 0.05 weather) | 95% |
+| EV energy | 0.25 kWh/km x (1 + 0.5 congestion), as % of 50 kWh | 100% |
+
+base_carbon is 0.27 kg CO2 per km on every segment (1st-99th percentile
+0.267-0.273), so the GNN's carbon is for one reference vehicle emitting
+0.27 kg/km in free flow, and its EV energy is for one reference EV at
+0.25 kWh/km. This is what vehicle-specific carbon (12.2) scales.
+
+The exceptions are mostly segments with `event_disruption` > 0. Their travel
+time labels are about 25% BELOW the rule (median ratio 0.71-0.94 across the
+10 snapshots; carbon is mixed, 0.73-1.34). Two corrections follow:
+- 11.3 said the GNN's "incident = faster" response came from a feature that
+  was never learned. Wrong: the GNN learned what the labels say. In this
+  dataset an incident flag does not mean a slower road. 11.3 and both
+  disruption modules are corrected.
+- The rain response (x1.18-1.22) matches the label rule (x1.19), although
+  there is still no labelled rain snapshot in the test split.
+
+For the paper this quantifies 7.2's point: the targets are near-deterministic
+functions of the edge features on 95-100% of segments.
+
+### 12.2 Vehicle-specific carbon (`agents/vehicles.py`)
+
+| Type | kg CO2/km | x GNN carbon | Typical payload |
+|---|---|---|---|
+| Diesel light goods vehicle (<3.5 t) | 0.3070 | 1.137 | 750 kg |
+| Diesel medium truck (<12 t) | 0.5928 | 2.196 | 5,000 kg |
+| Diesel three-wheeler | 0.1322 | 0.490 | 500 kg |
+| CNG three-wheeler | 0.10768 | 0.399 | 500 kg |
+| Petrol scooter (<110 cc) | 0.0334 | 0.124 | 20 kg |
+| Electric light goods vehicle | 0 tailpipe; 0.25 kWh/km x 0.727 kg/kWh | — | 750 kg |
+
+Sources: India GHG Program (WRI India, CII, TERI), "India Specific Road
+Transport Emission Factors", Version 1.0, 2015 (freight LDV/MDV, three-
+and two-wheeler tables); Central Electricity Authority, "CO2 Baseline
+Database for the Indian Power Sector", User Guide Version 20.0 (Dec 2024),
+Table S, FY 2023-24 weighted average 0.727 t CO2/MWh. Payloads are typical
+values, not from those sources. The EV energy is the dataset's own figure.
+
+How it is used:
+- `Vehicle.vehicle_type` (schemas). When set, `is_ev` follows the type and a
+  missing `max_payload_kg` takes the typical payload. None keeps the
+  pre-Phase-5 behaviour exactly.
+- `costs_for_vehicle(costs, type)`: combustion -> carbon x factor; electric
+  -> carbon = its energy x grid factor. Time and delay unchanged.
+- `FleetCosts`: per-type cost frames and solvers, shared by the Route Agent,
+  Coordinator and Carbon Optimizer; the Execution agent simulates each route
+  on its vehicle's costs; the pipeline labels results with `vehicle_type`;
+  ESG reports `vehicle_types`. Every carbon figure for a typed vehicle is
+  then its own CO2.
+- Measured on 100 trips x 3 weightings: a combustion type never changes the
+  route (a uniform scale, removed by the solver's percentile scaling);
+  an EV's route is identical in 93 / 86 / 53 of 100 trips for balanced /
+  greenest / carbon-only weights, because its CO2 follows energy use.
+- Dispatcher: when any vehicle has a type, each (vehicle, delivery) pair is
+  scored as seconds to reach the pickup + 600 s x trip CO2 (kg) -- a vehicle
+  up to 10 minutes further away wins if it emits 1 kg less. 600 is a policy
+  setting. Without types the score is the distance alone, as before.
+
+Caveats to state: travel time is the same for every vehicle type (the GNN
+has one time per road); combustion figures are tailpipe only, electric are
+electricity at the power station without transmission or charging losses;
+the published factors come from rated fuel efficiency.
+
+### 12.3 Delivery deadlines
+
+`DeliveryRequest.deadline_s` = latest acceptable arrival, in seconds after
+the vehicle leaves the origin (it used to say "from dispatch" and was unused).
+- Coordinator: new conflict type `deadline`, deterministic (a hard
+  constraint, not a trade-off). The request's weights move toward time-only
+  in 25% steps; the first route that meets the deadline is taken; if even
+  the fastest misses, the plan is not fully resolved. `meet_deadline()` is
+  public so the app's solver-only mode uses the same rule.
+- Carbon Optimizer: second hard rule -- a greener swap that would miss the
+  deadline is rejected whatever the LLM says.
+- Execution: `deadline_met` per route (simulated arrival vs deadline).
+- ESG: `num_with_deadline`, `deadline_met_rate`.
+- Closed loop (11.4): rule `deadline` between `ev_range` and `dominated`.
+- The evaluation's golden scenarios have no deadlines or vehicle types, so
+  9.6 still stands.
+
+Seen in a full LLM pipeline run (sample costs, Peenya -> Rajajinagar,
+greenest, EV, deadline 19.5 min): the Route Agent's route was expected to
+take 20.3 min; the Coordinator moved the weights 100% to time-only (18.6
+min); the Carbon Optimizer's LLM then ACCEPTED a greener swap (-0.585 kg,
++106 s) and the deadline rule rejected it. Simulated arrival 17.8 min,
+deadline met.
+
+### 12.4 Multi-stop rounds with OR-Tools (`agents/multi_stop.py`)
+
+A capacitated vehicle routing problem with time windows and battery limits
+for a few vehicles leaving one depot: `plan_tours()` (also
+`DispatcherAgent.plan_tours()`).
+- Legs: for each vehicle type and each pair of points, the route the
+  single-delivery planner would take (that type's costs, the delivery's
+  weights) with its expected time, CO2 and energy. One one-to-all search
+  per point and type (predecessors only; building all paths was most of
+  the time).
+- Objective per vehicle: (time + delay weight) x expected time / mean leg
+  time + (carbon + ev weight) x CO2 / mean leg CO2 -- real units, so a
+  mixed fleet is steered to its cleaner vehicles when carbon matters.
+- Constraints: payload, deadlines as time windows (2 minutes hand-over per
+  stop), EV battery. A stop that cannot be served is dropped and reported.
+- Baselines on the same legs: nearest-neighbour (each vehicle in turn takes
+  the closest stop that fits) and every delivery as its own round trip.
+- `simulate_tours()` drives each tour through the Execution noise model and
+  checks deadlines against simulated arrivals.
+- It minimises time and CO2 summed over vehicles, NOT the time the last
+  parcel arrives: without deadlines it may give everything to one vehicle.
+
+`agents/multi_stop_experiment.py`: 20 random rounds (random depot, 10
+drop-offs 10-40 minutes away, 10-80 kg parcels, 300 kg per vehicle, a
+deadline on every other stop = 1.5 x direct time + 20 min), on
+sample_costs/. Means per round; deadlines summed over 100:
+
+| Fleet | Priority | Method | Time (min) | CO2 (kg) | Deadlines met | Simulated |
+|---|---|---|---|---|---|---|
+| diesel x3 | greenest | OR-Tools | 256.7 | 37.47 | 100 | 97 |
+| diesel x3 | greenest | nearest-neighbour | 270.1 | 40.75 | 59 | |
+| diesel x3 | greenest | separate trips | 582.7 | 91.73 | (100) | |
+| mixed | greenest | OR-Tools | 260.1 | 18.05 | 100 | 98 |
+| mixed | greenest | nearest-neighbour | 270.8 | 31.52 | 59 | |
+| mixed | greenest | separate trips | 582.7 | 57.36 | (100) | |
+| diesel x3 | fastest | OR-Tools | 243.7 | 39.20 | 100 | 99 |
+| mixed | fastest | OR-Tools | 244.1 | 19.46 | 100 | 98 |
+
+(mixed = electric LGV + diesel LGV + CNG three-wheeler. "Separate trips"
+deadlines are counted as if each trip started fresh, the most generous
+reading.)
+
+Reading it: OR-Tools served every stop and met every deadline in plan; the
+nearest-neighbour heuristic met 56-59 of 100. Bundling stops halves the
+driving against one trip per delivery. The same plan with the mixed fleet
+emits 52% less CO2 than with three diesel vehicles for about 1% more time --
+that is the value of vehicle type in the objective. 1-3 of 100 deadlines
+were missed in the simulated drives (the plan uses expected times).
+
+### 12.5 Distributed runtime (`agents/cluster.py`)
+
+Dask (`dask[distributed]`): a scheduler and worker processes that talk over
+TCP. `connect(workers=N)` starts N local worker processes;
+`connect(scheduler="tcp://host:8786")` joins workers started by hand,
+possibly on other machines (commands in the module docstring; each worker
+needs its own copy of the repo and data). `release(client)` disconnects and
+stops workers it started -- `client.close()` alone left a local cluster's
+workers running, which is how a 4-worker run first ran out of memory.
+
+Distributed jobs: `score_snapshots()` (GNN inference, combined into exact
+pooled R^2), `route_batch()`, and the re-plan experiment
+(`replan_experiment.py --workers N`, one trip per task; the experiment was
+split into `sample_trips()` / `run_trip()` / `run_all()` for this, with the
+same trips and rows either way). Each worker loads the GNN once. LLM calls
+are not distributed (they wait on the network; the pipeline already overlaps
+them with threads).
+
+`agents/cluster_benchmark.py`, this laptop (i5-13500H, 12 cores, 16 GB):
+
+| Job | Serial | 1 worker | 2 workers | 4 workers | Same answer |
+|---|---|---|---|---|---|
+| GNN on all 381 test snapshots | 43.8 s | 44.6 s (x0.98) | 36.5 s (x1.20) | 28.4 s (x1.54) | yes |
+| Re-plan experiment, 24 trips | 44.6 s | 62.6 s (x0.71) | 42.3 s (x1.06) | 32.7 s (x1.36) | yes |
+| Re-plan experiment, 120 trips | 303.9 s | | | 145.3 s (x2.09) | yes |
+
+The distributed GNN run reproduces the training report's test R^2 (0.9488 /
+0.9687 / 0.9431 / 0.9445) to 9 decimal places; different thread counts
+change float summation order in the 11th. Results:
+`agents/evaluation_results/cluster_benchmark.csv` and
+`cluster_benchmark_replan120.csv`.
+
+Reading it honestly: speed-ups are modest. The serial GNN run already uses
+all cores through PyTorch; each re-plan worker first rebuilds its own GNN
+and road worlds (~0.9 GB and several seconds each), which only pays off on
+bigger jobs (x1.36 at 24 trips, x2.09 at 120); four such workers is the
+memory limit of this laptop. Tested as separate processes on one machine
+(`tests/test_cluster.py` starts a scheduler and two workers from the
+command line and connects over TCP); NOT tested across two machines.
+
+**What to tell the panel:** the system runs its heavy jobs on a distributed
+task runtime -- worker processes coordinated by a scheduler over the
+network, which can sit on separate machines -- with identical results to a
+single process and measured speed-ups up to x2.1 on four local workers. The
+edge-cloud deployment in the Review 1 abstract is future work (12.6).
+
+### 12.6 Scope: written up as future work, not built (for the guide to confirm)
+
+| Review 1 item | Status | Why, with the measured facts |
+|---|---|---|
+| Neo4j graph database | Future work | The graph (7,095 junctions, 15,083 segments) fits in memory and is searched in milliseconds; a database adds operations, not results. The Drive's "Neo4j-style" explorer is a visualisation only. |
+| LangGraph orchestration | Future work | The six agents are orchestrated in plain Python (`agents/pipeline.py`) with the same structure a LangGraph graph would have; switching changes the framework, not the behaviour. |
+| Rebuild the graph every 30 seconds | Partly answered | The computation is not the obstacle: GNN re-scoring takes about 0.12 s per snapshot (43.8 s for 381). The missing piece is a live data feed (8.1, option B in 8.3). |
+| GNN retraining from telemetry | Future work | Telemetry already corrects later plans (11.6), but retraining needs real telemetry; simulated telemetry would only teach the GNN its own noise model. |
+| Edge-cloud deployment | Future work | The runtime supports workers on other machines (12.5); vehicles as edge nodes and a cloud planner are not built or tested. |
+| Fleet / Warehouse / EV / ESG agents | Replaced | Team decision 2026-10-07: the six agents in this repo. Mapping for the deck in Phase 6. |
+
+### 12.7 Files and verification
+
+New: `agents/vehicles.py`, `agents/multi_stop.py`,
+`agents/multi_stop_experiment.py`, `agents/cluster.py`,
+`agents/cluster_benchmark.py`, `app_common.py`,
+`pages/1_Multi-stop_fleet_planner.py` (not `multi_stop.py`: the pages/
+folder is on the import path when a page runs and that name shadowed
+`agents/multi_stop.py`), `tests/test_fleet.py`, `tests/test_cluster.py`.
+Changed: schemas, all six agents' modules except the ESG narrative, the
+pipeline, the feedback loop, the re-plan experiment, `live_app.py`,
+`requirements.txt` (+ ortools, dask[distributed]).
+
+- `tests/test_fleet.py` 11/11, `tests/test_cluster.py` 2/2,
+  `tests/test_feedback_loop.py` 16/16, `tests/test_bmssp.py` 6/6.
+- Automated app checks: every vehicle type plans (time identical across
+  combustion types), deadlines met and missed are reported, the loop's
+  deadline rule fires, the multi-stop page plans for two priorities; viewed
+  in the browser.
+- One full LLM pipeline run with two vehicle types and a deadline (12.3).
+- Untyped fleets: dispatcher smoke test output unchanged; default routing
+  unchanged (11.7).
+
+App: the main page has a "Vehicle" selector (reference vehicle or a type;
+the EV toggle only for the reference vehicle) and a deadline input; demo
+scenarios reset both so their talking points still hold. The CO2 metric is
+labelled tailpipe or grid electricity. The second page, "Multi-stop fleet
+planner", takes a depot, drop-offs, a priority, deadlines and a fleet of up
+to three vehicles (three, because only the palette's first three colours
+are validated as distinguishable everywhere on a map), and shows the
+comparison, a map of each vehicle's round and per-stop expected and
+simulated arrivals.
