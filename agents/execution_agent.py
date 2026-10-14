@@ -71,6 +71,7 @@ from llm_client import align_ids, chat_json
 # this simulation share one definition.
 from routing_solver import DELAY_EXTRA_TIME_RANGE, canonical_edges  # noqa: E402
 from schemas import RouteResult, Vehicle
+from vehicles import costs_for_vehicle
 
 TIME_JITTER_PCT = 0.10               # +-10% baseline prediction noise per edge
 TIME_DEVIATION_FLOOR_PCT = 0.15      # below this magnitude, treat as normal variance -- don't even ask the LLM
@@ -123,18 +124,30 @@ class ExecutionAgent:
     def __init__(self, costs_df: pd.DataFrame, model: str = None, seed: int = None):
         # canonical_edges: same choice among parallel roads as the solver made.
         self.edge_costs = {(row.src, row.dst): row for row in canonical_edges(costs_df).itertuples(index=False)}
+        self.costs_df = costs_df
+        self._edge_costs_by_type = {None: self.edge_costs}
         self.model = model
         # A seeded RNG makes simulate_route() reproducible for testing;
         # seed=None (default) gives a fresh draw each run, as a real
         # execution simulation should.
         self.rng = random.Random(seed)
 
+    def _edges_for(self, vehicle_type: str | None) -> dict:
+        if vehicle_type not in self._edge_costs_by_type:
+            costs = costs_for_vehicle(self.costs_df, vehicle_type)
+            self._edge_costs_by_type[vehicle_type] = {
+                (row.src, row.dst): row for row in canonical_edges(costs).itertuples(index=False)}
+        return self._edge_costs_by_type[vehicle_type]
+
     def simulate_route(self, result: RouteResult) -> dict:
         """
         Replays one route's edges against costs_df with the noise model
         described in the module docstring. Returns actual totals and how
-        many edges actually hit a simulated delay.
+        many edges actually hit a simulated delay. A route with a
+        vehicle_type is simulated on that vehicle's costs, so its carbon is
+        that vehicle's CO2.
         """
+        edge_costs = self._edges_for(result.vehicle_type)
         actual_time = 0.0
         actual_carbon = 0.0
         actual_ev = 0.0
@@ -142,7 +155,7 @@ class ExecutionAgent:
 
         edges = list(zip(result.path[:-1], result.path[1:]))
         for u, v in edges:
-            row = self.edge_costs.get((u, v))
+            row = edge_costs.get((u, v))
             if row is None:
                 continue  # shouldn't happen -- the route came from this same costs_df
 
@@ -201,6 +214,9 @@ class ExecutionAgent:
                 "planned_time_s": r.total_travel_time_s,
                 "expected_time_s": expected_time_s,
                 "time_deviation_pct": time_deviation_pct,
+                "deadline_s": r.deadline_s,
+                "deadline_met": None if r.deadline_s is None else sim["actual_time_s"] <= r.deadline_s,
+                "vehicle_type": r.vehicle_type,
                 "hard_ev_violation": hard_ev_violation,
                 "replan_triggered": hard_ev_violation,
                 "reasoning": (

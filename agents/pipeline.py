@@ -74,12 +74,20 @@ def run_batch(
     dispatcher = DispatcherAgent(costs_df)
     assigned, unassigned = dispatcher.assign(requests, vehicles)
 
-    route_agent = RouteAgent(costs_df, model=model)
+    route_agent = RouteAgent(costs_df, model=model, vehicles=vehicles)
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         results = list(pool.map(lambda r: _route_or_failure(route_agent, r), assigned))
 
-    return results, unassigned
+    return _label_vehicle_types(results, vehicles), unassigned
+
+
+def _label_vehicle_types(results: list[RouteResult], vehicles: list[Vehicle]) -> list[RouteResult]:
+    """Marks each result with its vehicle's type, so later stages know whose costs it is in."""
+    types = {v.vehicle_id: v.vehicle_type for v in vehicles}
+    for r in results:
+        r.vehicle_type = types.get(r.vehicle_id)
+    return results
 
 
 def run_batch_with_negotiation(
@@ -108,7 +116,7 @@ def run_batch_with_negotiation(
     )
     final_results, rounds_used, fully_resolved = coordinator.resolve(results, assigned_by_id)
 
-    return final_results, unassigned, rounds_used, fully_resolved
+    return _label_vehicle_types(final_results, vehicles), unassigned, rounds_used, fully_resolved
 
 
 def run_batch_with_optimization(
@@ -137,9 +145,12 @@ def run_batch_with_optimization(
         costs_df, vehicles, model=model, edge_capacity=edge_capacity, max_rounds=max_rounds
     )
     negotiated_results, rounds_used, fully_resolved = coordinator.resolve(results, assigned_by_id)
+    _label_vehicle_types(negotiated_results, vehicles)
 
-    optimizer = CarbonOptimizerAgent(costs_df, model=model, penalized_edges=coordinator.penalized_edges)
+    optimizer = CarbonOptimizerAgent(costs_df, model=model, penalized_edges=coordinator.penalized_edges,
+                                     vehicles=vehicles)
     final_results, decisions_log = optimizer.optimize(negotiated_results, assigned_by_id)
+    _label_vehicle_types(final_results, vehicles)
 
     return final_results, unassigned, rounds_used, fully_resolved, decisions_log
 

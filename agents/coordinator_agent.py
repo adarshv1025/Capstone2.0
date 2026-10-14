@@ -26,6 +26,17 @@ Two conflict types:
     {time, delay, carbon, ev} weights dict biased toward energy efficiency
     -- this IS a genuine trade-off judgment (how much time/carbon to give
     up for feasibility), unlike edge_overload's fixed mechanism.
+
+A third type, added in Phase 5 (CLAUDE.md 12), needs no LLM:
+  - deadline: a request with a deadline_s whose route's EXPECTED time
+    (delays included) is later than the deadline. A deadline is a hard
+    constraint, not a trade-off, so this is resolved deterministically: the
+    request's own weights are moved toward time-only in steps of 25% and the
+    first route that meets the deadline is taken -- the smallest departure
+    from what the delivery asked for. If even the fastest route misses, the
+    request stays in violation and the plan is not fully resolved.
+
+Every request is re-solved on its own vehicle's costs (agents/vehicles.py).
 """
 
 import json
@@ -41,6 +52,10 @@ from routing_solver import RoutingSolver  # noqa: E402
 from llm_client import align_ids, chat_json
 from route_agent import build_route_result
 from schemas import DeliveryRequest, RouteResult, Vehicle
+from vehicles import FleetCosts
+
+TIME_ONLY = {"time": 1.0, "delay": 0.0, "carbon": 0.0, "ev": 0.0}
+DEADLINE_STEPS = (0.25, 0.5, 0.75, 1.0)   # share of the way from the request's weights to time-only
 
 NEGOTIATION_SYSTEM_PROMPT = """You are the Coordinator for a fleet of delivery vehicles sharing a road
 network. Each round you are given ALL of the current conflicts of ONE type
@@ -89,7 +104,8 @@ class CoordinatorAgent:
         ev_reference_kwh: float = 50.0,
         penalty_factor: float = 5.0,
     ):
-        self.solver = RoutingSolver(costs_df)
+        self.fleet = FleetCosts(costs_df, vehicles)
+        self.solver = self.fleet.solver(None)
         self.vehicles_by_id = {v.vehicle_id: v for v in vehicles}
         self.model = model
         self.edge_capacity = edge_capacity
@@ -101,6 +117,47 @@ class CoordinatorAgent:
         # can avoid re-solving a route straight back onto an edge this
         # Coordinator already worked to route around.
         self.penalized_edges: set = set()
+
+    @staticmethod
+    def _deadline_violations(results: list[RouteResult]) -> list[str]:
+        return [
+            r.request_id for r in results
+            if r.success and r.deadline_s is not None
+            and (r.expected_travel_time_s or r.total_travel_time_s) > r.deadline_s
+        ]
+
+    def meet_deadline(self, request: DeliveryRequest, current: RouteResult, penalized_edges: set = None) -> RouteResult:
+        """
+        The smallest move toward time-only weights that meets the deadline;
+        the fastest route if none does (still a violation, reported as such).
+        """
+        solver = self.fleet.solver(request.vehicle_id)
+        penalized_edges = penalized_edges or set()
+        base = current.weights_used or {"time": 0.25, "delay": 0.25, "carbon": 0.25, "ev": 0.25}
+        total = sum(base.values()) or 1.0
+        base = {k: base.get(k, 0.0) / total for k in TIME_ONLY}
+        expected_min = (current.expected_travel_time_s or current.total_travel_time_s) / 60
+        attempt = None
+        for step in DEADLINE_STEPS:
+            weights = {k: (1 - step) * base[k] + step * TIME_ONLY[k] for k in TIME_ONLY}
+            solved = solver.find_route(request.origin, request.destination, weights=weights,
+                                       penalized_edges=penalized_edges, penalty_factor=self.penalty_factor)
+            if not solved["success"]:
+                continue
+            attempt = (step, weights, solved)
+            if solved["expected_travel_time_s"] <= request.deadline_s:
+                break
+        if attempt is None:
+            return current
+        step, weights, solved = attempt
+        met = solved["expected_travel_time_s"] <= request.deadline_s
+        reasoning = (
+            f"Deadline {request.deadline_s / 60:.1f} min: the planned route was expected to take "
+            f"{expected_min:.1f} min. Weights moved {step:.0%} of the way toward time-only; the new route is "
+            f"expected to take {solved['expected_travel_time_s'] / 60:.1f} min"
+            + (" and meets it." if met else ", and even the fastest route misses it.")
+        )
+        return build_route_result(request, solved, weights, reasoning)
 
     @staticmethod
     def _ev_energy_pct(r: RouteResult) -> float:
@@ -178,7 +235,8 @@ class CoordinatorAgent:
 
         for round_num in range(1, self.max_rounds + 1):
             overloaded_edges, ev_violations = self._detect_conflicts(list(results_by_id.values()))
-            if not overloaded_edges and not ev_violations:
+            deadline_violations = self._deadline_violations(list(results_by_id.values()))
+            if not overloaded_edges and not ev_violations and not deadline_violations:
                 self.penalized_edges = penalized_edges
                 return list(results_by_id.values()), rounds_used, True
             rounds_used = round_num
@@ -240,7 +298,7 @@ class CoordinatorAgent:
                     if request is None or rid not in results_by_id:
                         continue
                     weights = results_by_id[rid].weights_used
-                    solver_result = self.solver.find_route(
+                    solver_result = self.fleet.solver(request.vehicle_id).find_route(
                         request.origin, request.destination,
                         weights=weights, penalized_edges=penalized_edges, penalty_factor=self.penalty_factor,
                     )
@@ -275,7 +333,7 @@ class CoordinatorAgent:
                     if request is None:
                         continue
                     weights = weight_adjustments.get(rid, {"time": 0.1, "delay": 0.1, "carbon": 0.2, "ev": 0.6})
-                    solver_result = self.solver.find_route(
+                    solver_result = self.fleet.solver(request.vehicle_id).find_route(
                         request.origin, request.destination,
                         weights=weights, penalized_edges=penalized_edges, penalty_factor=self.penalty_factor,
                     )
@@ -283,8 +341,16 @@ class CoordinatorAgent:
                         request, solver_result, weights, decision.get("reasoning")
                     )
 
+            # Deadlines last in the round: a re-route above can make a
+            # route slower, and this is the hard constraint.
+            for rid in self._deadline_violations(list(results_by_id.values())):
+                request = requests_by_id.get(rid)
+                if request is not None and request.deadline_s is not None:
+                    results_by_id[rid] = self.meet_deadline(request, results_by_id[rid], penalized_edges)
+
         overloaded_edges, ev_violations = self._detect_conflicts(list(results_by_id.values()))
-        fully_resolved = not overloaded_edges and not ev_violations
+        deadline_violations = self._deadline_violations(list(results_by_id.values()))
+        fully_resolved = not overloaded_edges and not ev_violations and not deadline_violations
         self.penalized_edges = penalized_edges
         return list(results_by_id.values()), rounds_used, fully_resolved
 

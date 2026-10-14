@@ -47,19 +47,14 @@ import folium  # noqa: E402
 import torch  # noqa: E402
 from streamlit_folium import st_folium  # noqa: E402
 
+from app_common import (BENGALURU_CENTER, CHECKPOINT_DIR, EV_REFERENCE_KWH, GRAPH_DIR, SNAPSHOT_DIR,  # noqa: E402
+                        draw_route, load_graph, load_predictor, load_snapshot_index, missing_data, nearest_node,
+                        node_label, predict_costs)
 from disruptions import apply_incident, edge_at_fraction, edges_near  # noqa: E402
-from gnn_inference import GNNCostPredictor  # noqa: E402
 from routing_solver import DELAY_EXTRA_TIME_RANGE, RoutingSolver, canonical_edges  # noqa: E402
 from schemas import DeliveryRequest, Vehicle  # noqa: E402
 from snapshot_disruptions import with_congestion_surge, with_rain  # noqa: E402
-
-CHECKPOINT_DIR = ROOT / "gnn_checkpoints_v3"
-SNAPSHOT_DIR = ROOT / "dataset_kaggle" / "test"
-GRAPH_DIR = ROOT / "bengaluru_graph"
-SNAPSHOT_INDEX = SNAPSHOT_DIR / "_index.json"
-
-EV_REFERENCE_KWH = 50.0  # ev_energy_pct is % of a 50kWh battery (CLAUDE.md 2.1)
-BENGALURU_CENTER = (12.9716, 77.5946)
+from vehicles import GRID_KG_CO2_PER_KWH, VEHICLE_TYPES, costs_for_vehicle  # noqa: E402
 
 # Same fixed slot order as agents/dashboard.py, so both dashboards read alike.
 COLORS = {
@@ -80,6 +75,10 @@ CHART_SERIES = {
     "dark": {"Grid graphs": "#3987e5", "Sparse random graphs": "#d95926", "Bengaluru road graph": "#199e70"},
 }
 ALGORITHM_OPTIONS = {"Dijkstra": "dijkstra", "Tsinghua BMSSP (Duan et al. 2025)": "bmssp"}
+# Vehicle types (agents/vehicles.py). The first entry keeps the behaviour from
+# before Phase 5: the GNN's own reference vehicle and the "Electric vehicle" toggle.
+REFERENCE_VEHICLE = "GNN reference vehicle (as before)"
+VEHICLE_OPTIONS = {REFERENCE_VEHICLE: None, **{p.label: key for key, p in VEHICLE_TYPES.items()}}
 BASELINE_WEIGHTS = {
     "baseline_time_only": {"time": 1.0, "delay": 0.0, "carbon": 0.0, "ev": 0.0},
     "baseline_carbon_only": {"time": 0.0, "delay": 0.0, "carbon": 1.0, "ev": 0.0},
@@ -103,6 +102,7 @@ RULE_LABELS = {
     "policy": "a fixed rule: the gain is above the 5% threshold (LLM is off)",
     "policy_fallback": "a fixed rule, because the LLM could not be reached",
     "llm": "the LLM, weighing the change against the delivery's priority",
+    "deadline": "a fixed rule: the delivery's deadline",
     "not_informed": "nobody: the planner was never told",
     "arrived": "nobody: the vehicle had already arrived",
 }
@@ -162,66 +162,8 @@ DEMO_SCENARIOS = {
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Cached loaders
+# Cached loaders (the shared ones live in app_common.py)
 # ══════════════════════════════════════════════════════════════════════════
-
-@st.cache_resource(show_spinner="Loading GNN v3 checkpoint...")
-def load_predictor():
-    return GNNCostPredictor(checkpoint_dir=str(CHECKPOINT_DIR))
-
-
-@st.cache_data(show_spinner="Loading Bengaluru road graph...")
-def load_graph():
-    """Node i in the GNN == feature i in nodes.geojson (verified: edge order matches too)."""
-    nodes = json.loads((GRAPH_DIR / "nodes.geojson").read_text(encoding="utf-8"))["features"]
-    edges = json.loads((GRAPH_DIR / "edges.geojson").read_text(encoding="utf-8"))["features"]
-
-    osm_to_idx = {f["properties"]["osmid"]: i for i, f in enumerate(nodes)}
-    nodes_df = pd.DataFrame({
-        "lat": [f["properties"]["lat"] for f in nodes],
-        "lon": [f["properties"]["lon"] for f in nodes],
-        "name": [
-            f["properties"]["warehouse_name"] or f["properties"]["ev_station_name"] or ""
-            for f in nodes
-        ],
-        "category": [f["properties"]["node_category"] for f in nodes],
-    })
-
-    # Indexed by row (== costs_df row == edges.geojson feature), not by
-    # (u, v): 83 junction pairs are joined by two parallel roads, and which
-    # one a route uses is decided per snapshot by canonical_edges().
-    edge_geom = [[(lat, lon) for lon, lat in f["geometry"]["coordinates"]] for f in edges]  # (lat, lon) for folium
-    edge_len = [f["properties"].get("length") or 0.0 for f in edges]
-    return nodes_df, edge_geom, edge_len
-
-
-@st.cache_data(show_spinner="Indexing traffic snapshots (first run only)...")
-def load_snapshot_index():
-    files = sorted(glob.glob(str(SNAPSHOT_DIR / "snapshot_*.pt")))
-    cached = {}
-    if SNAPSHOT_INDEX.exists():
-        cached = json.loads(SNAPSHOT_INDEX.read_text())
-    rows = []
-    for f in files:
-        name = Path(f).stem
-        if name not in cached:
-            s = torch.load(f, weights_only=False)
-            cached[name] = {
-                "date": str(s.date), "hour": int(s.hour),
-                "weather": str(s.weather), "incident": bool(s.has_incident),
-            }
-        rows.append({"file": f, "snapshot": name, **cached[name]})
-    SNAPSHOT_INDEX.write_text(json.dumps(cached))
-    return pd.DataFrame(rows)
-
-
-@st.cache_data(show_spinner="Running live GNN inference on this snapshot...", max_entries=16)
-def predict_costs(snapshot_file: str):
-    snapshot = torch.load(snapshot_file, weights_only=False)
-    t0 = time.perf_counter()
-    costs = load_predictor().predict(snapshot)
-    return costs, time.perf_counter() - t0
-
 
 @st.cache_data(show_spinner="Re-scoring every road with the GNN on the new conditions...", max_entries=16)
 def predict_changed(snapshot_file: str, kind: str, rows: tuple = ()):
@@ -234,18 +176,6 @@ def predict_changed(snapshot_file: str, kind: str, rows: tuple = ()):
 # ══════════════════════════════════════════════════════════════════════════
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════
-
-def nearest_node(nodes_df, lat, lon) -> int:
-    dlat = np.radians(nodes_df["lat"].values - lat)
-    dlon = np.radians(nodes_df["lon"].values - lon) * np.cos(np.radians(lat))
-    return int(np.argmin(dlat ** 2 + dlon ** 2))
-
-
-def node_label(nodes_df, idx) -> str:
-    row = nodes_df.iloc[idx]
-    name = row["name"] or f"Junction #{idx}"
-    return f"{name} ({row.lat:.4f}, {row.lon:.4f})"
-
 
 def route_distance_km(rows, edge_len) -> float:
     return sum(edge_len[r] for r in rows) / 1000.0
@@ -285,17 +215,6 @@ def route_summary(path, rows, total_time_s, total_carbon_kg, total_ev_pct, edge_
         "ev_kwh": total_ev_pct / 100.0 * EV_REFERENCE_KWH,
         "edges": max(len(path) - 1, 0),
     }
-
-
-def draw_route(fmap, rows, edge_geom, color, label, weight=6, dash=None, opacity=0.9):
-    coords = []
-    for r in rows:
-        seg = edge_geom[r]
-        coords.extend(seg if not coords else seg[1:])
-    if coords:
-        folium.PolyLine(coords, color=color, weight=weight, opacity=opacity,
-                        dash_array=dash, tooltip=label).add_to(fmap)
-    return coords
 
 
 def build_map(nodes_df, edge_geom, src, dst, plan):
@@ -342,10 +261,13 @@ def build_map(nodes_df, edge_geom, src, dst, plan):
 # ══════════════════════════════════════════════════════════════════════════
 
 def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use_agents, edge_len, seed,
-               algorithm="dijkstra"):
-    solver = RoutingSolver(costs_df, algorithm=algorithm)
+               algorithm="dijkstra", vehicle_type=None, deadline_s=None):
+    # Every number on the page is for the chosen vehicle: its own CO2
+    # (tailpipe, or grid electricity for an EV) and, for an EV, its energy.
+    vcosts = costs_for_vehicle(costs_df, vehicle_type)
+    solver = RoutingSolver(vcosts, algorithm=algorithm)
     # Same choice among parallel roads as the solver and the Execution agent.
-    ce = canonical_edges(costs_df)
+    ce = canonical_edges(vcosts)
     uv = list(zip(ce["src"].tolist(), ce["dst"].tolist()))
     row_of = dict(zip(uv, ce.index.tolist()))
     edge_tp = dict(zip(uv, zip(ce["travel_time_s"].tolist(), ce["delay_probability"].tolist())))
@@ -369,10 +291,10 @@ def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use
         from pipeline import run_full_pipeline  # imports litellm; only needed in this mode
 
         request = DeliveryRequest(request_id="live-0", origin=src, destination=dst,
-                                  priority=priority, package_weight_kg=min(payload_kg, 50.0))
+                                  priority=priority, package_weight_kg=min(payload_kg, 50.0), deadline_s=deadline_s)
         vehicle = Vehicle(vehicle_id="veh-live", is_ev=is_ev,
                           battery_capacity_kwh=battery_kwh if is_ev else None,
-                          max_payload_kg=payload_kg, current_location=src)
+                          max_payload_kg=payload_kg, current_location=src, vehicle_type=vehicle_type)
         # The agents build their own RoutingSolver, which reads this setting.
         previous = os.environ.get("ROUTING_ALGORITHM")
         os.environ["ROUTING_ALGORITHM"] = algorithm
@@ -415,13 +337,27 @@ def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use
         }
         weights = presets.get(priority, {"time": 0.25, "delay": 0.25, "carbon": 0.25, "ev": 0.25})
         r = solver.find_route(src, dst, weights=weights)
-        routes["multi_agent"] = summarize(r["path"], r["total_travel_time_s"], r["total_carbon_kg"],
-                                          r["expected_ev_energy_pct"])
         trace["weights"] = weights
         trace["reasoning"] = "Solver-only mode: fixed preset weights, no LLM agents were called."
         if priority not in presets and priority != "balanced":
             trace["reasoning"] += (" Free-text priorities can't be interpreted without the LLM, "
                                    "so this fell back to 'balanced'.")
+        if deadline_s is not None and r["success"] and r["expected_travel_time_s"] > deadline_s:
+            # The Coordinator's deterministic deadline rule, without the LLM.
+            from coordinator_agent import CoordinatorAgent
+            from route_agent import build_route_result
+
+            request = DeliveryRequest(request_id="live-0", origin=src, destination=dst, priority=priority,
+                                      deadline_s=deadline_s, vehicle_id="veh-live")
+            vehicle = Vehicle(vehicle_id="veh-live", vehicle_type=vehicle_type)
+            met = CoordinatorAgent(costs_df, [vehicle]).meet_deadline(
+                request, build_route_result(request, r, weights, None))
+            r = {"path": met.path, "total_travel_time_s": met.total_travel_time_s,
+                 "total_carbon_kg": met.total_carbon_kg, "expected_ev_energy_pct": met.expected_ev_energy_pct}
+            trace["final_weights"] = met.weights_used
+            trace["deadline_note"] = met.reasoning
+        routes["multi_agent"] = summarize(r["path"], r["total_travel_time_s"], r["total_carbon_kg"],
+                                          r["expected_ev_energy_pct"])
 
     # Same single-source search with both shortest-path algorithms, using the
     # weights the displayed route was planned with, so the page can show how
@@ -431,6 +367,7 @@ def plan_route(costs_df, src, dst, priority, is_ev, battery_kwh, payload_kg, use
     return {"routes": routes, "trace": trace, "src": src, "dst": dst,
             "priority": priority, "is_ev": is_ev, "battery_kwh": battery_kwh,
             "use_agents": use_agents, "algorithm": algorithm, "seed": seed,
+            "vehicle_type": vehicle_type, "deadline_s": deadline_s,
             "token": time.time()}  # ties an "On the road" result to the plan it was run on
 
 
@@ -444,6 +381,9 @@ def run_loop(plan, costs_df, snap_df, snap_row, kind, when, ahead, hops, slowdow
 
     path = plan["routes"]["multi_agent"]["path"]
     weights = plan["trace"].get("final_weights") or plan["trace"]["weights"]
+    vehicle_type = plan.get("vehicle_type")
+    for_vehicle = lambda frame: costs_for_vehicle(frame, vehicle_type)  # noqa: E731
+    gnn_costs, costs_df = costs_df, for_vehicle(costs_df)   # from here on, the vehicle's own costs
     ce = canonical_edges(costs_df)
     uv = list(zip(ce["src"].tolist(), ce["dst"].tolist()))
     edge_time = dict(zip(uv, ce["travel_time_s"].tolist()))
@@ -458,19 +398,19 @@ def run_loop(plan, costs_df, snap_df, snap_row, kind, when, ahead, hops, slowdow
                  f"{slowdown:g} times slower.")
         basis = "assumed"
     elif kind == "rain":
-        after = predict_changed(snap_row["file"], "rain")
+        after = for_vehicle(predict_changed(snap_row["file"], "rain"))
         event = "Heavy rain has started across the city."
     elif kind == "surge":
         first = path.index(edge_at_fraction(path, edge_time, where)[0])
         rows = tuple(row_of[e] for e in zip(path[first:-1], path[first + 1:]))
-        after = predict_changed(snap_row["file"], "surge", rows)
+        after = for_vehicle(predict_changed(snap_row["file"], "surge", rows))
         event = "Traffic has built up on the planned route ahead."
     elif kind == "update":
         later = snap_df[(snap_df["date"] == snap_row["date"]) & (snap_df["hour"] > snap_row["hour"])].sort_values("hour")
         if later.empty:
             return {"error": f"There is no later traffic snapshot on {snap_row['date']} (this is the last of the day). "
                              "Pick an earlier snapshot in the sidebar."}
-        after, _ = predict_costs(later.iloc[0]["file"])
+        after = for_vehicle(predict_costs(later.iloc[0]["file"])[0])
         event = f"The {int(later.iloc[0]['hour']):02d}:00 traffic update has arrived."
     else:
         after, event, basis = costs_df, "Nothing has changed.", "none"
@@ -479,7 +419,7 @@ def run_loop(plan, costs_df, snap_df, snap_row, kind, when, ahead, hops, slowdow
                       battery_capacity_kwh=plan["battery_kwh"] if plan["is_ev"] else None)
     report = ClosedLoopExecutor(costs_df, after, seed=plan["seed"], use_llm=plan["use_agents"], informed=told).run(
         path, weights, priority=plan["priority"], vehicle=vehicle, disruption_after_fraction=when,
-        request_id="live-0", event=event)
+        request_id="live-0", event=event, deadline_s=plan.get("deadline_s"))
 
     fleet = None
     if not told and report["disruption_reached"]:
@@ -548,10 +488,9 @@ def build_loop_map(nodes_df, edge_geom, plan, loop):
 
 st.set_page_config(page_title="Bengaluru Logistics – Live Planner", layout="wide")
 
-missing = [p for p in (CHECKPOINT_DIR / "best_model.pt", GRAPH_DIR / "nodes.geojson",
-                       GRAPH_DIR / "edges.geojson") if not p.exists()]
-if missing or not glob.glob(str(SNAPSHOT_DIR / "snapshot_*.pt")):
-    st.error("Missing data files: " + ", ".join(str(m) for m in missing or [SNAPSHOT_DIR]))
+missing = missing_data()
+if missing:
+    st.error("Missing data files: " + ", ".join(str(m) for m in missing))
     st.stop()
 
 nodes_df, edge_geom, edge_len = load_graph()
@@ -581,6 +520,8 @@ ss.setdefault("payload", 200.0)
 ss.setdefault("use_agents", True)
 ss.setdefault("seed", 0)
 ss.setdefault("algorithm", "Dijkstra")
+ss.setdefault("vehicle_sel", REFERENCE_VEHICLE)
+ss.setdefault("deadline_min", 0.0)
 ss.setdefault("scenario", "—")
 
 
@@ -592,6 +533,8 @@ def load_scenario():
     ss.snap_label = snap_label_by_name.get(sc["snapshot"], ss.snap_label)
     ss.priority_sel, ss.custom_text = sc["priority"], sc["custom"]
     ss.is_ev, ss.battery, ss.seed = sc["ev"], sc["battery"], sc["seed"]
+    # The scenarios' talking points were measured with the reference vehicle and no deadline.
+    ss.vehicle_sel, ss.deadline_min = REFERENCE_VEHICLE, 0.0
     ss.plan = None
 
 
@@ -628,10 +571,21 @@ with st.sidebar:
                            placeholder="e.g. urgent medicine, but avoid heavy traffic")
     if custom.strip():
         priority = custom.strip()
-    is_ev = st.toggle("Electric vehicle", key="is_ev")
+    vehicle_type = VEHICLE_OPTIONS[st.selectbox(
+        "Vehicle", list(VEHICLE_OPTIONS), key="vehicle_sel",
+        help="CO2 per km from the India GHG Program (2015); an electric vehicle's CO2 is its electricity x the "
+             "CEA grid factor (0.727 kg/kWh, FY 2023-24). Travel time is the same for every vehicle.")]
+    if vehicle_type is None:
+        is_ev = st.toggle("Electric vehicle", key="is_ev")
+    else:
+        is_ev = VEHICLE_TYPES[vehicle_type].is_ev
     battery_kwh = st.slider("Battery capacity (kWh)", 1.0, 60.0, step=0.5, key="battery",
                             disabled=not is_ev)
     payload_kg = st.number_input("Max payload (kg)", 10.0, 5000.0, step=10.0, key="payload")
+    deadline_min = st.number_input("Deadline, minutes after leaving (0 = none)", 0.0, 600.0, step=5.0,
+                                   key="deadline_min",
+                                   help="A hard limit: if the planned route is expected to arrive later, the "
+                                        "planner moves toward faster weights until it fits.")
 
     st.subheader("4 · Planner")
     use_agents = st.toggle("Use multi-agent LLM pipeline", key="use_agents",
@@ -645,6 +599,10 @@ with st.sidebar:
     go = st.button("🚚 Plan route", type="primary", width="stretch",
                    disabled=ss.src is None or ss.dst is None or ss.src == ss.dst)
 
+    st.subheader("5 · Disruption on the road")
+    st.caption("After planning, add an incident, rain or a traffic build-up part-way through the trip and see "
+               "whether the system re-plans: [On the road](#on-the-road), in the main page below the route.")
+
 # ---- Run -----------------------------------------------------------------
 costs_df, infer_s = predict_costs(snap_row["file"])
 
@@ -653,7 +611,8 @@ if go:
                     if use_agents else "Solving..."):
         try:
             ss.plan = plan_route(costs_df, ss.src, ss.dst, priority, is_ev, battery_kwh,
-                                 payload_kg, use_agents, edge_len, int(seed), algorithm)
+                                 payload_kg, use_agents, edge_len, int(seed), algorithm,
+                                 vehicle_type=vehicle_type, deadline_s=deadline_min * 60 if deadline_min > 0 else None)
             ss.plan["snapshot"] = snap_label
         except Exception as e:  # rate limits etc. -- show, don't crash the app
             ss.plan = {"error": f"{type(e).__name__}: {str(e)[:600]}"}
@@ -718,16 +677,39 @@ m[2].metric("Expected with delays", f"{ma['expected_min']:.1f} min",
             help="Planned time plus each segment's delay probability × average delay impact.")
 m[3].metric("90% arrive within", f"{ma['p90_min']:.1f} min",
             help="90th percentile of 2,000 simulated drives — a safe time to promise.")
-m[4].metric("CO₂", f"{ma['carbon_kg']:.2f} kg")
-m[5].metric("EV energy", f"{ma['ev_kwh']:.2f} kWh",
-            help="Expected battery use including typical delays.")
+vtype = plan.get("vehicle_type")
+if vtype is None:
+    m[4].metric("CO₂", f"{ma['carbon_kg']:.2f} kg", help="For the GNN's reference vehicle (0.27 kg CO₂/km in free flow).")
+elif VEHICLE_TYPES[vtype].is_ev:
+    m[4].metric("CO₂ (grid electricity)", f"{ma['carbon_kg']:.2f} kg",
+                help=f"Electricity used × the CEA grid factor ({GRID_KG_CO2_PER_KWH} kg/kWh, FY 2023-24). No "
+                     "tailpipe CO₂; transmission and charging losses not included.")
+else:
+    m[4].metric("CO₂ (tailpipe)", f"{ma['carbon_kg']:.2f} kg",
+                help=f"{VEHICLE_TYPES[vtype].label}: {VEHICLE_TYPES[vtype].kg_co2_per_km} kg CO₂/km "
+                     "(India GHG Program, 2015), with the GNN's congestion and weather effects.")
+if plan["is_ev"]:
+    m[5].metric("EV energy", f"{ma['ev_kwh']:.2f} kWh", help="Expected battery use including typical delays.")
+else:
+    m[5].metric("EV energy", "—", help="Not an electric vehicle.")
 
+if plan.get("deadline_s"):
+    late = ma["expected_min"] > plan["deadline_s"] / 60
+    (st.error if late else st.success)(
+        f"Expected arrival {ma['expected_min']:.1f} min vs deadline {plan['deadline_s'] / 60:.0f} min — "
+        + ("misses it even on the fastest route." if late else "within the deadline.")
+        + (f" 90% of simulated drives arrive within {ma['p90_min']:.1f} min." if not late else ""))
+    if trace.get("deadline_note"):
+        st.caption(trace["deadline_note"])
 if plan["is_ev"]:
     ok = ma["ev_kwh"] <= plan["battery_kwh"]
     (st.success if ok else st.error)(
         f"Expected EV energy {ma['ev_kwh']:.2f} kWh (typical delays included) vs battery "
         f"{plan['battery_kwh']:.1f} kWh — "
         + ("within the battery." if ok else "more than the battery holds."))
+
+st.info("To introduce a disruption part-way through this trip (a road incident, rain or a traffic build-up) "
+        "and see the system re-plan, go to [On the road](#on-the-road) further down.", icon="🚧")
 
 # ---- Comparison vs baselines ----------------------------------------------
 st.subheader("Compared with single-objective baselines")
@@ -760,7 +742,7 @@ b1.bar_chart(chart_df[["Time (min)"]], horizontal=True, color=COLORS["multi_agen
 b2.bar_chart(chart_df[["CO₂ (kg)"]], horizontal=True, color=COLORS["baseline_carbon_only"])
 
 # ---- On the road: the closed loop -------------------------------------------
-st.subheader("On the road: what if conditions change after the vehicle leaves?")
+st.subheader("On the road: what if conditions change after the vehicle leaves?", anchor="on-the-road")
 st.caption(
     "The route above was planned on one traffic snapshot. Here the vehicle drives it, conditions change part-way, "
     "and the Execution agent decides whether to re-plan from where the vehicle is. There is no live traffic feed "

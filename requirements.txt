@@ -3,3 +3,6 @@ networkx
 pydantic>=2
 litellm
 python-dotenv
+# Phase 5: multi-stop planning (agents/multi_stop.py) and the distributed runtime (agents/cluster.py)
+ortools>=9.12
+dask[distributed]>=2025.1

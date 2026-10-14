@@ -122,6 +122,12 @@ class ESGReporterAgent:
         num_ev_infeasible = sum(1 for rep in ev_reports if rep["hard_ev_violation"])
         ev_feasibility_rate = (len(ev_reports) - num_ev_infeasible) / len(ev_reports) if ev_reports else None
 
+        # Phase 5 (CLAUDE.md 12). None when no request had a deadline.
+        with_deadline = [rep for rep in simulated if rep.get("deadline_met") is not None]
+        deadline_met_rate = (
+            sum(1 for rep in with_deadline if rep["deadline_met"]) / len(with_deadline) if with_deadline else None)
+        vehicle_types = sorted({r.vehicle_type for r in successful if r.vehicle_type})
+
         accepted_swaps = [d for d in decisions_log if d["accepted"]]
         # accepted swaps always have carbon_delta_kg < 0 (Phase 5's hard
         # rule), so negating the sum turns it into a positive "kg saved".
@@ -147,6 +153,11 @@ class ESGReporterAgent:
             "carbon_optimizer_swaps_evaluated": len(decisions_log),
             "carbon_saved_by_optimizer_kg": carbon_saved_by_optimizer_kg,
             "negotiation_rounds_used": negotiation_rounds_used,
+            "num_with_deadline": len(with_deadline),
+            "deadline_met_rate": deadline_met_rate,
+            # Non-empty means carbon figures are per vehicle type (tailpipe,
+            # or grid electricity for an EV), not the GNN's reference vehicle.
+            "vehicle_types": vehicle_types,
         }
 
     def narrate(self, metrics: dict) -> str:

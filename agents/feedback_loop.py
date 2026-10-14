@@ -40,6 +40,10 @@ of them settles it:
                    energy than the battery has left and the alternative
                    fits, switch. Never switch to a route that does not fit
                    when the plan does.
+ 2b. deadline   -- HARD rule (added in Phase 5). If finishing the plan is
+                   expected to miss the delivery's deadline and the
+                   alternative meets it, switch; never switch to a route
+                   that misses a deadline the plan meets.
  3. dominated   -- never switch to a route that is expected to be both
                    slower and more polluting.
  4. small_gain  -- the alternative is under REPLAN_MIN_GAIN_PCT better on
@@ -99,7 +103,9 @@ Decide whether to switch. Weigh the request's stated priority: a "fastest"
 request should take a real time saving even at some carbon cost; a
 "greenest" request should not accept noticeably more carbon unless the time
 saving is large; "balanced" sits between. A switch that is worse on the
-thing the request cares about most is not worth making.
+thing the request cares about most is not worth making. deadline_minutes,
+when not null, is the latest acceptable total trip time; a fixed rule has
+already handled the cases where only one option meets it.
 
 Respond with ONLY this JSON object:
     {"decisions": {"<request_id>": {"replan": true, "reasoning": "one sentence"}}}
@@ -191,7 +197,7 @@ class ClosedLoopExecutor:
 
     def run(self, path: list, weights: dict, priority: str = "balanced", vehicle: Vehicle = None,
             disruption_after_fraction: float = 0.4, request_id: str = "trip",
-            event: str = "Road conditions ahead have changed.") -> dict:
+            event: str = "Road conditions ahead have changed.", deadline_s: float = None) -> dict:
         """
         path, weights: the planned route and the weights it was planned with.
         disruption_after_fraction: when conditions change, as a share of the
@@ -246,7 +252,8 @@ class ClosedLoopExecutor:
             battery_left_pct = vehicle.battery_capacity_kwh / EV_REFERENCE_KWH * 100.0 - before["ev_energy_pct"]
 
         # 3. Decide.
-        decision = self._decide(request_id, priority, event, elapsed_s, promised_s, stay, alternative, battery_left_pct)
+        decision = self._decide(request_id, priority, event, elapsed_s, promised_s, stay, alternative,
+                                battery_left_pct, deadline_s)
 
         # 4. Drive both futures in the changed world, same luck on shared roads.
         believed = self.world_after if self.informed else self.world_before
@@ -301,7 +308,8 @@ class ClosedLoopExecutor:
             "ev_violation": ev_violation,
         }
 
-    def _decide(self, request_id, priority, event, elapsed_s, promised_s, stay, alternative, battery_left_pct) -> dict:
+    def _decide(self, request_id, priority, event, elapsed_s, promised_s, stay, alternative, battery_left_pct,
+                deadline_s=None) -> dict:
         if not self.informed:
             return {"replan": False, "rule": "not_informed",
                     "reasoning": "The planner was not told that conditions changed, so the vehicle kept to its plan."}
@@ -331,6 +339,18 @@ class ClosedLoopExecutor:
                 return {"replan": False, "rule": "ev_range", **numbers,
                         "reasoning": "The new route would not fit the battery that is left; the planned one does."}
 
+        if deadline_s is not None:
+            stay_meets = elapsed_s + stay["expected_time_s"] <= deadline_s
+            alt_meets = elapsed_s + alternative["expected_time_s"] <= deadline_s
+            if not stay_meets and alt_meets:
+                return {"replan": True, "rule": "deadline", **numbers,
+                        "reasoning": f"Finishing the planned route is now expected to miss the "
+                                     f"{deadline_s / 60:.1f} min deadline; the new route meets it -- must re-plan."}
+            if stay_meets and not alt_meets:
+                return {"replan": False, "rule": "deadline", **numbers,
+                        "reasoning": f"The new route would miss the {deadline_s / 60:.1f} min deadline; "
+                                     "the planned one meets it."}
+
         if time_delta_s >= 0 and carbon_delta_kg >= 0:
             return {"replan": False, "rule": "dominated", **numbers,
                     "reasoning": "The new route is expected to be no faster and no cleaner than the planned one."}
@@ -352,6 +372,7 @@ class ClosedLoopExecutor:
             "what_changed": event,
             "minutes_driven_so_far": round(elapsed_s / 60, 1),
             "promised_total_minutes": round(promised_s / 60, 1),
+            "deadline_minutes": round(deadline_s / 60, 1) if deadline_s is not None else None,
             "continue_on_planned_route": {
                 "expected_total_minutes": round((elapsed_s + stay["expected_time_s"]) / 60, 1),
                 "co2_kg_from_here": round(stay["expected_carbon_kg"], 3),

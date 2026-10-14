@@ -16,7 +16,10 @@ WHAT THE GNN CAN AND CANNOT MODEL
   Carbon and EV energy barely move (+1% to +5%). Caveat: rain is rare in the
   training data (weather_impact has mean 0.013 and s.d. 0.073 there, so 0.6
   is about 8 s.d. out) and the test split has no rain snapshot at all, so
-  this response cannot be checked against labelled rain data here.
+  it cannot be checked against labelled rain data. It does match the rule
+  that generated the travel-time labels (exact on 97% of segments,
+  CLAUDE.md 12.1): x(1 + 0.3 x 0.6) for weather and about +1% for the road
+  surface, x1.19 in all.
 - A congestion surge on chosen roads (with_congestion_surge): works, but
   only where there is headroom. congestion_index is already 0.98-0.99 on a
   rush-hour snapshot (09:00, 17:00), so a surge changes under 1% there.
@@ -31,8 +34,10 @@ WHAT THE GNN CAN AND CANNOT MODEL
   which road was best by enough to re-route (CLAUDE.md 11.8).
 - A road incident via `event_disruption`: DOES NOT WORK. Raising it to 0.6
   or 1.0 on a route's edges made the model predict them 10-24% FASTER and
-  less likely to be delayed. Do not add a helper for it; use
-  agents/disruptions.apply_incident instead.
+  less likely to be delayed -- which is what its training labels say:
+  segments with event_disruption > 0 are labelled about 25% faster than the
+  rule used for the other 97% (CLAUDE.md 12.1). Do not add a helper for it;
+  use agents/disruptions.apply_incident instead.
 """
 
 import torch

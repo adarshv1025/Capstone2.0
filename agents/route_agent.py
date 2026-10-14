@@ -23,6 +23,7 @@ from routing_solver import RoutingSolver  # noqa: E402
 
 from llm_client import chat_json
 from schemas import DeliveryRequest, RouteResult
+from vehicles import FleetCosts
 
 def build_route_result(
     request: DeliveryRequest, solver_result: dict, weights: dict, reasoning: str | None
@@ -42,6 +43,7 @@ def build_route_result(
             priority=request.priority,
             weights_used=weights,
             reasoning=reasoning,
+            deadline_s=request.deadline_s,
         )
 
     return RouteResult(
@@ -60,6 +62,7 @@ def build_route_result(
         priority=request.priority,
         weights_used=weights,
         reasoning=reasoning,
+        deadline_s=request.deadline_s,
     )
 
 
@@ -83,8 +86,11 @@ Respond with ONLY the JSON object, no other text. Example:
 
 
 class RouteAgent:
-    def __init__(self, costs_df: pd.DataFrame, model: str = None):
-        self.solver = RoutingSolver(costs_df)
+    def __init__(self, costs_df: pd.DataFrame, model: str = None, vehicles: list = None):
+        # Each request is routed on the costs of the vehicle it was given
+        # (agents/vehicles.py); without vehicle types that is costs_df.
+        self.fleet = FleetCosts(costs_df, vehicles)
+        self.solver = self.fleet.solver(None)
         self.model = model
 
     def _weights_from_priority(self, priority: str) -> tuple[dict, str | None]:
@@ -103,7 +109,7 @@ class RouteAgent:
 
     def route(self, request: DeliveryRequest) -> RouteResult:
         weights, reasoning = self._weights_from_priority(request.priority)
-        result = self.solver.find_route(request.origin, request.destination, weights=weights)
+        result = self.fleet.solver(request.vehicle_id).find_route(request.origin, request.destination, weights=weights)
         return build_route_result(request, result, weights, reasoning)
 
 

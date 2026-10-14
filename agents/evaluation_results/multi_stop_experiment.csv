@@ -1,0 +1,241 @@
+instance,fleet,priority,method,total_time_min,total_co2_kg,stops_served,deadlines_met,deadlines_total,vehicles_used,co2_by_vehicle_type,simulated_deadlines_met
+0,diesel,fastest,optimised,265.53308356713177,39.333714575513866,10,5,5,2.0,{'diesel_ldv': 17.812},5.0
+0,diesel,fastest,nearest_neighbour,282.9815729624451,44.02790964487079,10,3,5,2.0,{'diesel_ldv': 26.294},
+0,diesel,fastest,separate_trips,578.9259129062173,92.86187683330438,10,5,5,,,
+0,diesel,greenest,optimised,275.8831994074994,38.83149058395534,10,5,5,2.0,{'diesel_ldv': 17.777},5.0
+0,diesel,greenest,nearest_neighbour,291.76463265990964,43.66964495158176,10,3,5,2.0,{'diesel_ldv': 26.245},
+0,diesel,greenest,separate_trips,603.4895065212028,92.38155171074033,10,5,5,,,
+0,mixed,fastest,optimised,265.53308356713177,18.609524004562445,10,5,5,2.0,"{'ev_ldv': 11.061, 'cng_3w': 7.549}",5.0
+0,mixed,fastest,nearest_neighbour,282.9815729624451,37.252263349850566,10,3,5,2.0,"{'ev_ldv': 10.958, 'diesel_ldv': 26.294}",
+0,mixed,fastest,separate_trips,578.9259129062173,57.254492048236,10,5,5,,,
+0,mixed,greenest,optimised,275.8831994074994,18.413140209844087,10,5,5,2.0,"{'ev_ldv': 11.028, 'cng_3w': 7.385}",5.0
+0,mixed,greenest,nearest_neighbour,291.76463265990964,37.04385178315069,10,3,5,2.0,"{'ev_ldv': 10.799, 'diesel_ldv': 26.245}",
+0,mixed,greenest,separate_trips,596.0255892182499,56.7293488624448,10,5,5,,,
+1,diesel,fastest,optimised,226.54935519176053,33.637755624698684,10,5,5,2.0,{'diesel_ldv': 19.861},5.0
+1,diesel,fastest,nearest_neighbour,263.96224049550705,41.18186138241768,10,4,5,2.0,{'diesel_ldv': 16.642},
+1,diesel,fastest,separate_trips,592.6165725608785,88.25218443555792,10,5,5,,,
+1,diesel,greenest,optimised,234.24321273291727,31.263879074825148,10,5,5,2.0,{'diesel_ldv': 20.228},5.0
+1,diesel,greenest,nearest_neighbour,261.47992328927523,35.742915500275075,10,5,5,2.0,{'diesel_ldv': 22.885},
+1,diesel,greenest,separate_trips,612.2833138258684,84.0378235367071,10,5,5,,,
+1,mixed,fastest,optimised,226.54935519176053,15.675832064141694,10,5,5,2.0,"{'ev_ldv': 8.709, 'cng_3w': 6.966}",5.0
+1,mixed,fastest,nearest_neighbour,263.96224049550705,32.15898002269779,10,4,5,2.0,"{'ev_ldv': 15.516, 'diesel_ldv': 16.642}",
+1,mixed,fastest,separate_trips,592.6165725608785,55.48782084468864,10,5,5,,,
+1,mixed,greenest,optimised,234.24321273291727,13.98519986172991,10,5,5,2.0,"{'ev_ldv': 6.89, 'cng_3w': 7.095}",5.0
+1,mixed,greenest,nearest_neighbour,263.57133508202185,29.152171632855286,10,3,5,2.0,"{'ev_ldv': 12.333, 'diesel_ldv': 16.819}",
+1,mixed,greenest,separate_trips,613.8907880775449,52.56997309478643,10,5,5,,,
+2,diesel,fastest,optimised,221.10968726632112,33.26370099519118,10,5,5,2.0,{'diesel_ldv': 14.88},5.0
+2,diesel,fastest,nearest_neighbour,264.65434101454827,41.85440717606207,10,3,5,2.0,{'diesel_ldv': 18.371},
+2,diesel,fastest,separate_trips,531.8978311414271,87.03932898963775,10,5,5,,,
+2,diesel,greenest,optimised,231.63968809710155,32.684990033397305,10,5,5,2.0,{'diesel_ldv': 14.208},4.0
+2,diesel,greenest,nearest_neighbour,272.0100829181666,41.163542504255545,10,3,5,2.0,{'diesel_ldv': 17.757},
+2,diesel,greenest,separate_trips,560.2007878053092,85.30168215407411,10,5,5,,,
+2,mixed,fastest,optimised,221.1170471682622,15.757091976286109,10,5,5,2.0,"{'ev_ldv': 9.309, 'cng_3w': 6.448}",5.0
+2,mixed,fastest,nearest_neighbour,264.66170091648934,32.908603926368144,10,3,5,2.0,"{'ev_ldv': 14.537, 'diesel_ldv': 18.371}",
+2,mixed,fastest,separate_trips,531.8978311414271,54.27212887555311,10,5,5,,,
+2,mixed,greenest,optimised,231.63968809710155,15.369447705127508,10,5,5,2.0,"{'ev_ldv': 8.889, 'cng_3w': 6.481}",5.0
+2,mixed,greenest,nearest_neighbour,272.0100829181666,32.24286788124901,10,3,5,2.0,"{'ev_ldv': 14.486, 'diesel_ldv': 17.757}",
+2,mixed,greenest,separate_trips,550.8975412364068,53.18017374251667,10,5,5,,,
+3,diesel,fastest,optimised,238.273393805077,42.18246308681462,10,5,5,2.0,{'diesel_ldv': 16.045},5.0
+3,diesel,fastest,nearest_neighbour,250.63046619169512,44.17844880647208,10,2,5,2.0,{'diesel_ldv': 30.038},
+3,diesel,fastest,separate_trips,533.6525168798657,111.4916106685027,10,5,5,,,
+3,diesel,greenest,optimised,256.9413955270378,39.431087547696414,10,5,5,2.0,{'diesel_ldv': 15.934},5.0
+3,diesel,greenest,nearest_neighbour,267.7678788697202,42.78523536741133,10,2,5,2.0,{'diesel_ldv': 28.89},
+3,diesel,greenest,separate_trips,601.2524500062146,101.14143766392726,10,5,5,,,
+3,mixed,fastest,optimised,238.273393805077,19.2183935457504,10,5,5,2.0,"{'ev_ldv': 10.051, 'cng_3w': 9.168}",5.0
+3,mixed,fastest,nearest_neighbour,250.63046619169512,38.928707899615944,10,2,5,2.0,"{'ev_ldv': 8.891, 'diesel_ldv': 30.038}",
+3,mixed,fastest,separate_trips,533.6525168798657,71.33335383230578,10,5,5,,,
+3,mixed,greenest,optimised,256.9413955270378,18.21953845505238,10,5,5,2.0,"{'ev_ldv': 9.978, 'cng_3w': 8.242}",5.0
+3,mixed,greenest,nearest_neighbour,267.7678788697202,37.626212513249484,10,2,5,2.0,"{'ev_ldv': 8.736, 'diesel_ldv': 28.89}",
+3,mixed,greenest,separate_trips,603.0722049438535,63.76904718114076,10,5,5,,,
+4,diesel,fastest,optimised,259.0779020285989,41.16621010968668,10,5,5,3.0,{'diesel_ldv': 14.79},5.0
+4,diesel,fastest,nearest_neighbour,266.6265696894817,43.05762041438327,10,3,5,2.0,{'diesel_ldv': 14.614},
+4,diesel,fastest,separate_trips,561.339392492878,105.71398786243977,10,5,5,,,
+4,diesel,greenest,optimised,267.13790128071463,40.973865198552744,10,5,5,3.0,{'diesel_ldv': 14.676},5.0
+4,diesel,greenest,nearest_neighbour,305.2090851331376,47.229186683216945,10,3,5,2.0,{'diesel_ldv': 14.041},
+4,diesel,greenest,separate_trips,593.4029160488702,103.5603723668439,10,5,5,,,
+4,mixed,fastest,optimised,259.0779020285989,23.194414620251667,10,5,5,3.0,"{'ev_ldv': 9.303, 'diesel_ldv': 7.146, 'cng_3w': 6.745}",5.0
+4,mixed,fastest,nearest_neighbour,266.6265696894817,32.48012115903236,10,3,5,2.0,"{'ev_ldv': 17.866, 'diesel_ldv': 14.614}",
+4,mixed,fastest,separate_trips,561.339392492878,67.3291942759235,10,5,5,,,
+4,mixed,greenest,optimised,267.03638725876993,23.011410292612233,10,5,5,3.0,"{'ev_ldv': 9.188, 'diesel_ldv': 7.084, 'cng_3w': 6.739}",5.0
+4,mixed,greenest,nearest_neighbour,306.2815452181311,34.78707111112521,10,3,5,2.0,"{'ev_ldv': 20.746, 'diesel_ldv': 14.041}",
+4,mixed,greenest,separate_trips,592.5502826929772,65.7602270747632,10,5,5,,,
+5,diesel,fastest,optimised,278.67568478884556,46.100017312411666,10,5,5,3.0,{'diesel_ldv': 15.768},5.0
+5,diesel,fastest,nearest_neighbour,234.72960168089415,36.51531233587467,10,2,5,1.0,{'diesel_ldv': 36.515},
+5,diesel,fastest,separate_trips,537.2415372732158,94.08705864634504,10,5,5,,,
+5,diesel,greenest,optimised,295.68500406317366,42.985232975453414,10,5,5,3.0,{'diesel_ldv': 24.263},5.0
+5,diesel,greenest,nearest_neighbour,240.94895992850883,35.35109676626463,10,2,5,1.0,{'diesel_ldv': 35.351},
+5,diesel,greenest,separate_trips,579.722882684828,89.16097031257392,10,5,5,,,
+5,mixed,fastest,optimised,282.6142435721753,24.809616093530245,10,5,5,3.0,"{'ev_ldv': 9.042, 'diesel_ldv': 6.217, 'cng_3w': 9.551}",5.0
+5,mixed,fastest,nearest_neighbour,252.7531594980308,27.65804819407378,10,3,5,2.0,"{'ev_ldv': 21.441, 'diesel_ldv': 6.217}",
+5,mixed,fastest,separate_trips,537.2415372732158,59.509816650246805,10,5,5,,,
+5,mixed,greenest,optimised,295.68500406317366,22.524603524315168,10,5,5,3.0,"{'ev_ldv': 7.797, 'diesel_ldv': 6.217, 'cng_3w': 8.51}",5.0
+5,mixed,greenest,nearest_neighbour,257.4919818956114,26.52331553092212,10,3,5,2.0,"{'ev_ldv': 20.306, 'diesel_ldv': 6.217}",
+5,mixed,greenest,separate_trips,584.6214456756193,56.127015618225016,10,5,5,,,
+6,diesel,fastest,optimised,216.78017271700713,33.0255681514485,10,5,5,2.0,{'diesel_ldv': 17.315},5.0
+6,diesel,fastest,nearest_neighbour,230.28368589719386,34.76896826708857,10,3,5,2.0,{'diesel_ldv': 10.29},
+6,diesel,fastest,separate_trips,494.0022281878571,80.8835979990325,10,5,5,,,
+6,diesel,greenest,optimised,225.41327425216903,32.293941182813185,10,5,5,2.0,{'diesel_ldv': 14.979},5.0
+6,diesel,greenest,nearest_neighbour,239.70562100731374,33.884290130312635,10,4,5,2.0,{'diesel_ldv': 10.188},
+6,diesel,greenest,separate_trips,509.05195094062924,79.38100162545825,10,5,5,,,
+6,mixed,fastest,optimised,216.78017271700713,15.897301340843192,10,5,5,2.0,"{'ev_ldv': 9.824, 'cng_3w': 6.073}",5.0
+6,mixed,fastest,nearest_neighbour,230.291045799135,25.539633809953507,10,3,5,2.0,"{'ev_ldv': 15.25, 'diesel_ldv': 10.29}",
+6,mixed,fastest,separate_trips,494.0095880897981,50.74359954775636,10,5,5,,,
+6,mixed,greenest,optimised,231.36072305710564,14.515553298981974,10,5,5,2.0,"{'ev_ldv': 6.876, 'cng_3w': 7.639}",5.0
+6,mixed,greenest,nearest_neighbour,239.70562100731374,25.025206485273916,10,4,5,2.0,"{'ev_ldv': 14.837, 'diesel_ldv': 10.188}",
+6,mixed,greenest,separate_trips,509.05195094062924,49.692106562036585,10,5,5,,,
+7,diesel,fastest,optimised,200.80225890299153,29.481856147782,10,5,5,2.0,{'diesel_ldv': 10.801},5.0
+7,diesel,fastest,nearest_neighbour,244.53440137198692,36.81758740425138,10,4,5,2.0,{'diesel_ldv': 12.835},
+7,diesel,fastest,separate_trips,543.1628990171442,88.37067044166697,10,5,5,,,
+7,diesel,greenest,optimised,203.97060651376358,29.521286255419806,10,5,5,2.0,{'diesel_ldv': 13.173},4.0
+7,diesel,greenest,nearest_neighbour,246.49358059934877,36.80668345364943,10,4,5,2.0,{'diesel_ldv': 12.81},
+7,diesel,greenest,separate_trips,560.4668098032034,88.78367670019773,10,5,5,,,
+7,mixed,fastest,optimised,200.80225890299153,13.164873791069077,10,5,5,2.0,"{'ev_ldv': 6.613, 'cng_3w': 6.552}",5.0
+7,mixed,fastest,nearest_neighbour,244.53440137198692,27.664004886215892,10,4,5,2.0,"{'ev_ldv': 14.829, 'diesel_ldv': 12.835}",
+7,mixed,fastest,separate_trips,543.1628990171442,54.58835040744974,10,5,5,,,
+7,mixed,greenest,optimised,211.00150438614892,12.478466152135432,10,5,5,2.0,"{'ev_ldv': 4.086, 'cng_3w': 8.393}",5.0
+7,mixed,greenest,nearest_neighbour,246.49358059934877,27.640415236383276,10,4,5,2.0,"{'ev_ldv': 14.83, 'diesel_ldv': 12.81}",
+7,mixed,greenest,separate_trips,554.899759773103,54.64906541363452,10,5,5,,,
+8,diesel,fastest,optimised,229.93935393187851,38.647116522070206,10,5,5,2.0,{'diesel_ldv': 20.985},5.0
+8,diesel,fastest,nearest_neighbour,262.2637613647656,44.44900389751595,10,4,5,2.0,{'diesel_ldv': 15.21},
+8,diesel,fastest,separate_trips,618.9906206259194,120.03761943310693,10,5,5,,,
+8,diesel,greenest,optimised,259.7392899775856,37.5007754354086,10,5,5,2.0,{'diesel_ldv': 19.211},5.0
+8,diesel,greenest,nearest_neighbour,268.7749607242632,40.55604365643655,10,4,5,2.0,{'diesel_ldv': 12.2},
+8,diesel,greenest,separate_trips,644.3892905990498,112.19769022887812,10,5,5,,,
+8,mixed,fastest,optimised,229.93935393187851,18.580867736307546,10,5,5,2.0,"{'ev_ldv': 11.22, 'cng_3w': 7.36}",4.0
+8,mixed,fastest,nearest_neighbour,262.2637613647656,33.56382323613853,10,4,5,2.0,"{'ev_ldv': 18.353, 'diesel_ldv': 15.21}",
+8,mixed,fastest,separate_trips,618.9906206259194,75.37601885046539,10,5,5,,,
+8,mixed,greenest,optimised,259.7392899775856,18.324228012553924,10,5,5,2.0,"{'ev_ldv': 11.586, 'cng_3w': 6.738}",5.0
+8,mixed,greenest,nearest_neighbour,268.7749607242632,29.938547197351713,10,4,5,2.0,"{'ev_ldv': 17.739, 'diesel_ldv': 12.2}",
+8,mixed,greenest,separate_trips,644.1925357352874,70.33844138491699,10,5,5,,,
+9,diesel,fastest,optimised,261.2181391263205,41.74250598905334,10,5,5,2.0,{'diesel_ldv': 18.818},5.0
+9,diesel,fastest,nearest_neighbour,259.2807978143863,42.17728364931029,10,3,5,2.0,{'diesel_ldv': 18.222},
+9,diesel,fastest,separate_trips,631.7686769390976,101.94508216545884,10,5,5,,,
+9,diesel,greenest,optimised,274.5151345341682,39.55797612646768,10,5,5,2.0,{'diesel_ldv': 17.333},5.0
+9,diesel,greenest,nearest_neighbour,268.7869885956259,40.19901122595823,10,3,5,2.0,{'diesel_ldv': 17.611},
+9,diesel,greenest,separate_trips,637.651082512138,100.80553854015122,10,5,5,,,
+9,mixed,fastest,optimised,261.2181391263205,19.873949728018403,10,5,5,2.0,"{'ev_ldv': 11.833, 'cng_3w': 8.041}",5.0
+9,mixed,fastest,nearest_neighbour,259.2807978143863,33.134695556801205,10,3,5,2.0,"{'ev_ldv': 14.912, 'diesel_ldv': 18.222}",
+9,mixed,fastest,separate_trips,631.7686769390976,64.51444688394844,10,5,5,,,
+9,mixed,greenest,optimised,274.5151345341682,18.701743974816477,10,5,5,2.0,"{'ev_ldv': 10.906, 'cng_3w': 7.796}",5.0
+9,mixed,greenest,nearest_neighbour,268.205134039119,31.691326741429457,10,3,5,2.0,"{'ev_ldv': 14.081, 'diesel_ldv': 17.611}",
+9,mixed,greenest,separate_trips,640.8245780551083,63.82717518978862,10,5,5,,,
+10,diesel,fastest,optimised,294.2795472301723,51.07508177200326,10,5,5,3.0,{'diesel_ldv': 23.252},5.0
+10,diesel,fastest,nearest_neighbour,282.85368237828067,46.195203440363336,10,2,5,2.0,{'diesel_ldv': 14.987},
+10,diesel,fastest,separate_trips,640.7304381542916,105.01224726004305,10,5,5,,,
+10,diesel,greenest,optimised,308.0934938048795,45.962682800144776,10,5,5,3.0,{'diesel_ldv': 17.436},5.0
+10,diesel,greenest,nearest_neighbour,292.4611845761356,44.742514734131746,10,2,5,2.0,{'diesel_ldv': 14.541},
+10,diesel,greenest,separate_trips,652.798306604928,99.72694073675001,10,5,5,,,
+10,mixed,fastest,optimised,294.2795472301723,30.086505054966022,10,5,5,3.0,"{'ev_ldv': 9.774, 'diesel_ldv': 12.157, 'cng_3w': 8.156}",5.0
+10,mixed,fastest,nearest_neighbour,282.85368237828067,34.45578387503738,10,2,5,2.0,"{'ev_ldv': 19.469, 'diesel_ldv': 14.987}",
+10,mixed,fastest,separate_trips,640.7304381542916,65.70897772027125,10,5,5,,,
+10,mixed,greenest,optimised,315.6121633264453,25.60197649970592,10,5,5,3.0,"{'ev_ldv': 9.39, 'diesel_ldv': 7.533, 'cng_3w': 8.679}",5.0
+10,mixed,greenest,nearest_neighbour,292.4611845761356,33.417754010218914,10,2,5,2.0,"{'ev_ldv': 18.876, 'diesel_ldv': 14.541}",
+10,mixed,greenest,separate_trips,652.798306604928,62.288923245708645,10,5,5,,,
+11,diesel,fastest,optimised,218.4004664391415,32.45952687667715,10,5,5,2.0,{'diesel_ldv': 19.251},5.0
+11,diesel,fastest,nearest_neighbour,271.40264051290035,41.80938076148228,10,4,5,2.0,{'diesel_ldv': 14.225},
+11,diesel,fastest,separate_trips,558.99158804565,91.5493088190971,10,5,5,,,
+11,diesel,greenest,optimised,220.80718475351216,31.587290756740334,10,5,5,2.0,{'diesel_ldv': 18.872},5.0
+11,diesel,greenest,nearest_neighbour,279.8519243304556,41.81974103391987,10,4,5,2.0,{'diesel_ldv': 14.203},
+11,diesel,greenest,separate_trips,585.4651248352643,89.47255749677109,10,5,5,,,
+11,mixed,fastest,optimised,216.87360241441135,14.80830472011602,10,5,5,2.0,"{'ev_ldv': 8.056, 'cng_3w': 6.752}",5.0
+11,mixed,fastest,nearest_neighbour,218.88316397448773,24.444896433163315,10,4,5,2.0,"{'ev_ldv': 14.295, 'diesel_ldv': 10.15}",
+11,mixed,fastest,separate_trips,558.99158804565,57.655103169262276,10,5,5,,,
+11,mixed,greenest,optimised,233.66452781794996,14.179753423309354,10,5,5,2.0,"{'ev_ldv': 5.848, 'cng_3w': 8.332}",5.0
+11,mixed,greenest,nearest_neighbour,279.8519243304556,31.52683037041399,10,4,5,2.0,"{'ev_ldv': 17.324, 'diesel_ldv': 14.203}",
+11,mixed,greenest,separate_trips,585.4651248352643,56.06579168602999,10,5,5,,,
+12,diesel,fastest,optimised,241.1522761363202,43.7810229802217,10,5,5,2.0,{'diesel_ldv': 19.775},5.0
+12,diesel,fastest,nearest_neighbour,269.4123287108938,48.36870739900459,10,1,5,2.0,{'diesel_ldv': 21.248},
+12,diesel,fastest,separate_trips,556.8361834980533,104.28212947377138,10,5,5,,,
+12,diesel,greenest,optimised,253.89704626195763,41.54985062388127,10,5,5,2.0,{'diesel_ldv': 24.922},5.0
+12,diesel,greenest,nearest_neighbour,291.6730329306965,45.48418888415601,10,1,5,2.0,{'diesel_ldv': 19.132},
+12,diesel,greenest,separate_trips,603.7245498918395,97.56470159278706,10,5,5,,,
+12,mixed,fastest,optimised,241.1522761363202,20.867821835041596,10,5,5,2.0,"{'ev_ldv': 12.448, 'cng_3w': 8.42}",5.0
+12,mixed,fastest,nearest_neighbour,269.4123287108938,38.308913711355395,10,1,5,2.0,"{'ev_ldv': 17.061, 'diesel_ldv': 21.248}",
+12,mixed,fastest,separate_trips,556.8361834980533,65.57885917933773,10,5,5,,,
+12,mixed,greenest,optimised,253.89704626195763,19.089881143086636,10,5,5,2.0,"{'ev_ldv': 10.348, 'cng_3w': 8.741}",5.0
+12,mixed,greenest,nearest_neighbour,291.6730329306965,35.509254228326164,10,1,5,2.0,"{'ev_ldv': 16.377, 'diesel_ldv': 19.132}",
+12,mixed,greenest,separate_trips,605.6561139743025,60.72154268286845,10,5,5,,,
+13,diesel,fastest,optimised,227.5892278791187,35.86835372617,10,5,5,2.0,{'diesel_ldv': 17.189},5.0
+13,diesel,fastest,nearest_neighbour,235.88655498729068,37.05798907132541,10,3,5,2.0,{'diesel_ldv': 7.32},
+13,diesel,fastest,separate_trips,524.5157267774089,84.08140144292919,10,5,5,,,
+13,diesel,greenest,optimised,231.2403708805314,34.768054156650344,10,5,5,2.0,{'diesel_ldv': 18.08},5.0
+13,diesel,greenest,nearest_neighbour,238.80037520197558,36.39285150549288,10,3,5,2.0,{'diesel_ldv': 7.275},
+13,diesel,greenest,separate_trips,561.7307958078778,82.31113968661955,10,5,5,,,
+13,mixed,fastest,optimised,227.5892278791187,17.205665554529357,10,5,5,2.0,"{'ev_ldv': 10.654, 'cng_3w': 6.552}",5.0
+13,mixed,fastest,nearest_neighbour,235.88655498729068,25.994178522719874,10,3,5,2.0,"{'ev_ldv': 18.674, 'diesel_ldv': 7.32}",
+13,mixed,fastest,separate_trips,524.3809549397143,52.65079550096793,10,5,5,,,
+13,mixed,greenest,optimised,238.738263226156,15.841853930325664,10,5,5,2.0,"{'ev_ldv': 7.317, 'cng_3w': 8.525}",5.0
+13,mixed,greenest,nearest_neighbour,238.84562478518743,25.534563505645927,10,3,5,2.0,"{'ev_ldv': 18.259, 'diesel_ldv': 7.275}",
+13,mixed,greenest,separate_trips,564.999449114337,51.134377864727,10,5,5,,,
+14,diesel,fastest,optimised,219.21812758458682,33.25194910840571,10,5,5,2.0,{'diesel_ldv': 20.509},5.0
+14,diesel,fastest,nearest_neighbour,266.4301646137021,42.4210138140548,10,3,5,2.0,{'diesel_ldv': 15.205},
+14,diesel,fastest,separate_trips,537.9217843513044,91.0764647517481,10,5,5,,,
+14,diesel,greenest,optimised,227.66506390165435,31.807266661026063,10,5,5,2.0,{'diesel_ldv': 19.441},5.0
+14,diesel,greenest,nearest_neighbour,270.2571133659053,41.767664988249784,10,3,5,2.0,{'diesel_ldv': 15.197},
+14,diesel,greenest,separate_trips,550.1434584472725,89.6999777442081,10,5,5,,,
+14,mixed,fastest,optimised,219.21812758458682,15.238593480441452,10,5,5,2.0,"{'ev_ldv': 8.045, 'cng_3w': 7.194}",5.0
+14,mixed,fastest,nearest_neighbour,266.4301646137021,32.2256821565539,10,3,5,2.0,"{'ev_ldv': 17.021, 'diesel_ldv': 15.205}",
+14,mixed,fastest,separate_trips,537.9217843513044,57.03101009000807,10,5,5,,,
+14,mixed,greenest,optimised,227.66506390165435,14.57091102802843,10,5,5,2.0,"{'ev_ldv': 7.752, 'cng_3w': 6.819}",5.0
+14,mixed,greenest,nearest_neighbour,270.2571133659053,31.779850446719063,10,3,5,2.0,"{'ev_ldv': 16.583, 'diesel_ldv': 15.197}",
+14,mixed,greenest,separate_trips,550.1434584472725,56.03103569791594,10,5,5,,,
+15,diesel,fastest,optimised,249.56902479928632,42.83257641481771,10,5,5,2.0,{'diesel_ldv': 30.942},4.0
+15,diesel,fastest,nearest_neighbour,266.2000700704861,48.22337804181134,10,0,5,1.0,{'diesel_ldv': 48.223},
+15,diesel,fastest,separate_trips,562.3791046967641,105.31067961448306,10,5,5,,,
+15,diesel,greenest,optimised,271.76722463712247,41.36361331133296,10,5,5,2.0,{'diesel_ldv': 29.531},4.0
+15,diesel,greenest,nearest_neighbour,280.70212586169276,47.6241524953925,10,0,5,1.0,{'diesel_ldv': 47.624},
+15,diesel,greenest,separate_trips,583.9359117855437,102.84982525469223,10,5,5,,,
+15,mixed,fastest,optimised,249.56902479928632,18.30790857208932,10,5,5,2.0,"{'ev_ldv': 7.455, 'cng_3w': 10.853}",4.0
+15,mixed,fastest,nearest_neighbour,266.60237897383774,36.48399788000248,10,0,5,2.0,"{'ev_ldv': 20.28, 'diesel_ldv': 16.204}",
+15,mixed,fastest,separate_trips,562.3791046967641,65.93520260905483,10,5,5,,,
+15,mixed,greenest,optimised,271.76722463712247,17.771560004672377,10,5,5,2.0,"{'ev_ldv': 7.413, 'cng_3w': 10.358}",4.0
+15,mixed,greenest,nearest_neighbour,280.3326232267795,35.92290649699058,10,0,5,2.0,"{'ev_ldv': 19.95, 'diesel_ldv': 15.973}",
+15,mixed,greenest,separate_trips,583.7137159453927,64.39364284943153,10,5,5,,,
+16,diesel,fastest,optimised,195.88751495656427,29.559225259282034,10,5,5,2.0,{'diesel_ldv': 11.201},5.0
+16,diesel,fastest,nearest_neighbour,210.24729522040192,32.7071843504545,10,4,5,2.0,{'diesel_ldv': 23.854},
+16,diesel,fastest,separate_trips,439.4639069507181,71.18910351020314,10,5,5,,,
+16,diesel,greenest,optimised,208.77450742945604,29.527740961069625,10,5,5,2.0,{'diesel_ldv': 14.304},5.0
+16,diesel,greenest,nearest_neighbour,221.82644214001095,29.780128006211967,10,4,5,2.0,{'diesel_ldv': 21.022},
+16,diesel,greenest,separate_trips,465.2838741642692,71.24310037079177,10,5,5,,,
+16,mixed,fastest,optimised,195.88751495656427,13.399708147338036,10,5,5,2.0,"{'ev_ldv': 6.961, 'cng_3w': 6.439}",5.0
+16,mixed,fastest,nearest_neighbour,210.24729522040192,29.333789866245844,10,4,5,2.0,"{'ev_ldv': 5.48, 'diesel_ldv': 23.854}",
+16,mixed,fastest,separate_trips,439.4639069507181,44.191260982185085,10,5,5,,,
+16,mixed,greenest,optimised,212.54934920612155,13.692015805099693,10,5,5,2.0,"{'ev_ldv': 6.887, 'cng_3w': 6.805}",5.0
+16,mixed,greenest,nearest_neighbour,221.82644214001095,26.439794581481777,10,4,5,2.0,"{'ev_ldv': 5.418, 'diesel_ldv': 21.022}",
+16,mixed,greenest,separate_trips,465.2838741642692,44.24615064492493,10,5,5,,,
+17,diesel,fastest,optimised,321.67207227012545,58.60212462755857,10,5,5,3.0,{'diesel_ldv': 20.277},5.0
+17,diesel,fastest,nearest_neighbour,323.4578849268637,58.55623077280573,10,3,5,2.0,{'diesel_ldv': 20.468},
+17,diesel,fastest,separate_trips,594.5340539022385,105.618163269709,10,5,5,,,
+17,diesel,greenest,optimised,339.7388723427779,53.3785779606997,10,5,5,3.0,{'diesel_ldv': 19.685},5.0
+17,diesel,greenest,nearest_neighbour,346.57971866975896,57.20510458981934,10,3,5,2.0,{'diesel_ldv': 20.156},
+17,diesel,greenest,separate_trips,621.5021322656448,104.02334146716478,10,5,5,,,
+17,mixed,fastest,optimised,321.67207227012545,37.701795510830486,10,5,5,3.0,"{'ev_ldv': 12.055, 'diesel_ldv': 18.534, 'cng_3w': 7.112}",5.0
+17,mixed,fastest,nearest_neighbour,302.0722426380083,45.21876890610429,10,3,5,2.0,"{'ev_ldv': 18.572, 'diesel_ldv': 26.647}",
+17,mixed,fastest,separate_trips,594.5340539022385,66.06162291816587,10,5,5,,,
+17,mixed,greenest,optimised,359.6994460995263,29.589875201185848,10,5,5,3.0,"{'ev_ldv': 9.954, 'diesel_ldv': 8.602, 'cng_3w': 11.034}",5.0
+17,mixed,greenest,nearest_neighbour,316.8141374359198,41.2884863301184,10,3,5,2.0,"{'ev_ldv': 17.906, 'diesel_ldv': 23.383}",
+17,mixed,greenest,separate_trips,621.4037548337636,64.59238450021245,10,5,5,,,
+18,diesel,fastest,optimised,235.2990615548832,35.03746397140608,10,5,5,2.0,{'diesel_ldv': 19.204},5.0
+18,diesel,fastest,nearest_neighbour,257.9465749745451,38.4819522445436,10,3,5,2.0,{'diesel_ldv': 13.113},
+18,diesel,fastest,separate_trips,524.4680635227746,79.32737443534242,10,5,5,,,
+18,diesel,greenest,optimised,253.39574485118317,33.25065357098395,10,5,5,2.0,{'diesel_ldv': 18.758},5.0
+18,diesel,greenest,nearest_neighbour,240.88223079684727,32.32230316521506,10,4,5,2.0,{'diesel_ldv': 14.493},
+18,diesel,greenest,separate_trips,550.1633045834258,77.30851398007165,10,5,5,,,
+18,mixed,fastest,optimised,235.2990615548832,16.829454016562543,10,5,5,2.0,"{'ev_ldv': 10.094, 'cng_3w': 6.736}",5.0
+18,mixed,fastest,nearest_neighbour,257.9465749745451,29.09966802071251,10,3,5,2.0,"{'ev_ldv': 15.987, 'diesel_ldv': 13.113}",
+18,mixed,fastest,separate_trips,524.4754234247156,50.076287437115646,10,5,5,,,
+18,mixed,greenest,optimised,253.39574485118317,15.635760629764217,10,5,5,2.0,"{'ev_ldv': 9.056, 'cng_3w': 6.579}",4.0
+18,mixed,greenest,nearest_neighbour,240.88223079684727,25.69108878997619,10,4,5,2.0,"{'ev_ldv': 11.199, 'diesel_ldv': 14.493}",
+18,mixed,greenest,separate_trips,554.7098035488392,48.447966468507474,10,5,5,,,
+19,diesel,fastest,optimised,272.60047688072535,42.931719168952405,10,5,5,3.0,{'diesel_ldv': 11.682},5.0
+19,diesel,fastest,nearest_neighbour,271.6059621202822,42.18148099040319,10,2,5,1.0,{'diesel_ldv': 42.181},
+19,diesel,fastest,separate_trips,540.2301113832898,87.97746271893767,10,5,5,,,
+19,diesel,greenest,optimised,294.21330150069446,41.25253093679635,10,5,5,3.0,{'diesel_ldv': 13.963},5.0
+19,diesel,greenest,nearest_neighbour,276.3742445818223,40.48152965997062,10,2,5,1.0,{'diesel_ldv': 40.482},
+19,diesel,greenest,separate_trips,577.0178247034142,83.64753665449908,10,5,5,,,
+19,mixed,fastest,optimised,277.597655358087,20.002166444533554,10,5,5,2.0,"{'ev_ldv': 10.315, 'cng_3w': 9.687}",5.0
+19,mixed,fastest,nearest_neighbour,283.7143171865073,32.29138981904665,10,3,5,2.0,"{'ev_ldv': 19.555, 'diesel_ldv': 12.737}",
+19,mixed,fastest,separate_trips,540.2269669142169,55.600158426509466,10,5,5,,,
+19,mixed,greenest,optimised,297.00672033953197,19.535675406688778,10,5,5,2.0,"{'ev_ldv': 9.417, 'cng_3w': 10.119}",5.0
+19,mixed,greenest,nearest_neighbour,299.8933625943315,31.709734222770017,10,3,5,2.0,"{'ev_ldv': 19.311, 'diesel_ldv': 12.398}",
+19,mixed,greenest,separate_trips,579.3478470346122,52.54861457258412,10,5,5,,,

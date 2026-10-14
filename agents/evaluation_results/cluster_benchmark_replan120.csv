@@ -1,0 +1,3 @@
+job,mode,workers,seconds,items,speedup,same_answer,worker_processes_seen
+replan,serial,1,303.91155330001493,120,1.0,True,1
+replan,dask,4,145.25198400000227,120,2.092305694771165,True,4

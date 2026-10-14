@@ -18,9 +18,11 @@ Two kinds, and it matters which one a result came from:
    get slower by a stated factor. This is an ASSUMPTION about the world, not
    a GNN prediction. It exists because the GNN cannot model an incident:
    measured 2026-10-13, raising `event_disruption` on a route's edges made
-   the model predict those edges 10-24% FASTER and less likely to be delayed
-   (that feature is non-zero on 1.5% of edges and was effectively never
-   learned -- CLAUDE.md 7.2). Say "we assume a 4x slowdown" when showing it.
+   the model predict those edges 10-24% FASTER and less likely to be delayed.
+   That follows the data: in the training labels, segments with
+   event_disruption > 0 take about 25% LESS time than the rule that sets the
+   other 97% of segments (CLAUDE.md 12.1). Say "we assume a 4x slowdown"
+   when showing it.
 """
 
 from collections import defaultdict, deque

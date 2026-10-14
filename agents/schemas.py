@@ -8,7 +8,7 @@ ESG Reporter in later phases) reads and writes, so keep them stable.
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DeliveryRequest(BaseModel):
@@ -16,7 +16,9 @@ class DeliveryRequest(BaseModel):
     origin: int  # graph node id
     destination: int  # graph node id
     priority: str = "balanced"  # fuzzy text: "fastest", "greenest", "balanced", or free-form
-    deadline_s: Optional[float] = None  # seconds from dispatch, if any
+    # Latest acceptable arrival at the destination, in seconds after the
+    # vehicle leaves the origin. A hard constraint where given (CLAUDE.md 12).
+    deadline_s: Optional[float] = None
     package_weight_kg: Optional[float] = None
     vehicle_id: Optional[str] = None  # filled in by the Dispatcher (phase 3+)
 
@@ -27,6 +29,21 @@ class Vehicle(BaseModel):
     battery_capacity_kwh: Optional[float] = None  # required if is_ev
     max_payload_kg: Optional[float] = None
     current_location: Optional[int] = None  # graph node id
+    # A key of agents/vehicles.VEHICLE_TYPES (e.g. "diesel_ldv", "ev_ldv").
+    # None = the GNN's own reference vehicle, as before Phase 5. When set,
+    # is_ev follows the type and a missing max_payload_kg takes the type's
+    # typical payload.
+    vehicle_type: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _apply_vehicle_type(self):
+        if self.vehicle_type is not None:
+            from vehicles import profile  # local: vehicles imports nothing from here
+            p = profile(self.vehicle_type)
+            self.is_ev = p.is_ev
+            if self.max_payload_kg is None:
+                self.max_payload_kg = p.typical_payload_kg
+        return self
 
 
 class RouteResult(BaseModel):
@@ -52,3 +69,9 @@ class RouteResult(BaseModel):
     priority: str
     weights_used: dict[str, float] = Field(default_factory=dict)
     reasoning: Optional[str] = None  # LLM's rationale for the chosen weights
+
+    # Phase 5 (CLAUDE.md 12). With a vehicle_type, every carbon figure above
+    # is that vehicle's CO2 (tailpipe, or grid electricity for an EV), not
+    # the GNN's reference vehicle.
+    vehicle_type: Optional[str] = None
+    deadline_s: Optional[float] = None  # copied from the DeliveryRequest

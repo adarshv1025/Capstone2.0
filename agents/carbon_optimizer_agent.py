@@ -40,6 +40,7 @@ from routing_solver import RoutingSolver  # noqa: E402
 from llm_client import align_ids, chat_json
 from route_agent import build_route_result
 from schemas import DeliveryRequest, RouteResult
+from vehicles import FleetCosts
 
 PROPOSE_SYSTEM_PROMPT = """You are the Carbon-Aware Optimizer for a fleet of delivery vehicles. You
 review a finalized routing plan and look for opportunities to reduce carbon
@@ -88,8 +89,10 @@ from the input.
 
 
 class CarbonOptimizerAgent:
-    def __init__(self, costs_df: pd.DataFrame, model: str = None, penalized_edges: set = None):
-        self.solver = RoutingSolver(costs_df)
+    def __init__(self, costs_df: pd.DataFrame, model: str = None, penalized_edges: set = None,
+                 vehicles: list = None):
+        self.fleet = FleetCosts(costs_df, vehicles)
+        self.solver = self.fleet.solver(None)
         self.model = model
         # Edges the Coordinator (Phase 4) already worked to route around --
         # a carbon-motivated re-route must keep avoiding them too, or it
@@ -146,7 +149,7 @@ class CarbonOptimizerAgent:
             request = requests_by_id.get(r.request_id)
             if request is None:
                 continue
-            solver_result = self.solver.find_route(
+            solver_result = self.fleet.solver(request.vehicle_id).find_route(
                 request.origin, request.destination,
                 weights=weights, penalized_edges=self.penalized_edges,
             )
@@ -190,6 +193,15 @@ class CarbonOptimizerAgent:
             # always reject a candidate that didn't even save carbon.
             decision = decisions.get(rid, {"accept": False, "reasoning": "no reflection response"})
             accept = bool(decision.get("accept")) and delta["carbon_delta_kg"] < 0
+            # Second hard rule (Phase 5): never trade a delivery's deadline
+            # for carbon.
+            deadline = requests_by_id[rid].deadline_s
+            breaks_deadline = (
+                deadline is not None and candidate_results[rid].expected_travel_time_s > deadline)
+            if breaks_deadline and accept:
+                accept = False
+                decision = {**decision, "reasoning": (decision.get("reasoning") or "")
+                            + f" [Rejected by rule: the greener route would miss the {deadline / 60:.1f} min deadline.]"}
 
             if accept:
                 results_by_id[rid] = candidate_results[rid]
