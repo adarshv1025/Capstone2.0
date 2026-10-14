@@ -8,13 +8,136 @@ Where to look for more:
 
 - `README.md` — what the project is, setup, how to run it.
 - `CLAUDE.md` — the full design log. Sections 1-4 are the original build
-  (GNN and the six agents); sections 5-9 are the work recorded here, with the
-  measurements behind each decision. Section 8 is the agreed plan and the
-  standing data limitation.
+  (GNN and the six agents); sections 5-11 are the work recorded here, with
+  the measurements behind each decision. Section 8 is the agreed plan and
+  the standing data limitation.
 - `git log` — the commits listed at the bottom of this file.
 
 Branch: `aayanvikramsingh` on `adarshv1025/Capstone2.0`. `main` is unchanged
 since the original two commits.
+
+---
+
+## 13 Oct 2026 — Phase 4: the closed feedback loop
+
+Details, measurements and the full results tables: `CLAUDE.md` section 11.
+
+### The loop from Execution back to routing: `agents/feedback_loop.py`
+- **What:** a vehicle drives its planned route, conditions change part-way,
+  and the Execution agent decides whether to re-plan from the junction the
+  vehicle is at. Both futures (finish the plan, or switch) are simulated
+  with the same luck on every road they share, so the reported saving is the
+  effect of the decision. Fixed rules decide first (route unchanged, EV
+  battery, no faster and no cleaner, gain under 5%); the LLM is asked only
+  when none of them settles it, and a fixed policy answers when the LLM is
+  off or unreachable.
+- **Why:** the architecture has always shown an arrow from Execution back to
+  routing. In the code the Execution agent simulated the whole trip and then
+  set a "re-plan" flag that nothing read. Phase 4 of the plan.
+- **Files:** `agents/feedback_loop.py` (new: `drive`, `ClosedLoopExecutor`,
+  `FeedbackStore`, `fleet_learning`).
+- **Checked by:** `python tests/test_feedback_loop.py` (16 of 16) and
+  `python agents/feedback_loop.py` (smoke test, no key needed).
+- **Not a seventh agent:** it is the Execution/Monitoring agent's job
+  extended. The six-agent pipeline and the evaluation harness are unchanged.
+
+### What can change on the road: `agents/disruptions.py`, `gnn/snapshot_disruptions.py`
+- **What:** two kinds of change. GNN-level: edit the snapshot and score it
+  again with the GNN (rain across the city, a congestion surge on chosen
+  roads, or the next snapshot of the day). World-level: a road incident as an
+  assumed slowdown (default 4x) on the segments around a point.
+- **Why two kinds:** measured, the GNN cannot model an incident. Raising its
+  `event_disruption` feature made it predict the affected roads 10-24%
+  faster. So an incident is stated as an assumption, never as a prediction.
+- **Also measured:** rain gives time x1.18-1.22 and a clear rise in delay
+  probability; a congestion surge does nothing at rush hour (congestion is
+  already 0.98-0.99) and x1.14 / x1.28 at 13:00 / 21:00; the hour-to-hour
+  snapshot change is close to one city-wide factor.
+- **Caveat:** rain is rare in training and absent from the test split, so
+  the rain response cannot be checked against labelled rain data.
+
+### Solver: `path_totals()` and `reference_costs`
+- **What:** `RoutingSolver.path_totals(path)` prices any path (it was
+  private to `find_route`). `RoutingSolver(costs_after,
+  reference_costs=costs_before)` prices changed roads in the original plan's
+  units: unchanged roads cost exactly what they did, a road now r times
+  worse costs r times more.
+- **Why:** the solver scales costs between percentiles and caps them at 1.0,
+  so a road that was already long and became 4x slower looked no worse than
+  before, and the planner would not avoid it.
+- **Files:** `gnn/routing_solver.py`. Default behaviour is unchanged.
+- **Checked by:** tests for both; `tests/test_bmssp.py` still 6 of 6; 200
+  of 200 random routes identical to the previous commit's solver, so every
+  earlier result still holds.
+
+### Execution agent: noise model shared
+- **What:** the per-segment noise (jitter, delay, carbon and energy
+  following time) is now the function `simulate_edge(row, rng)`, used by both
+  the Execution agent and the loop. The module note about re-planning being
+  "out of scope" now points to the loop.
+- **Files:** `agents/execution_agent.py`.
+- **Checked by:** 117 of 117 seeded runs give the same output as before.
+
+### Learning from telemetry: `FeedbackStore`
+- **What:** every drive records expected and actual time per segment. A
+  segment that keeps taking far longer than predicted gets a correction
+  factor, and the next vehicle is planned on corrected costs. The threshold
+  comes from the noise model: one unlucky but normal report can never
+  create a correction; a 4x incident does on its first report.
+- **Why:** this is the loop for the case where nobody reports the problem.
+- **Limits:** per segment only, not saved by the app, not fed into GNN
+  retraining. A correction also never expires: once a road is flagged,
+  vehicles avoid it, so no new reports arrive and it stays flagged after the
+  road clears. That needs an expiry or a probe vehicle before real use.
+
+### Experiment: `agents/replan_experiment.py`
+- **What:** 120 random trips, each under five kinds of change, re-plan
+  against no re-plan with paired luck; plus the unreported-incident case with
+  five vehicles in a row. No LLM, so it is free and repeatable (about 6.5
+  minutes). Results in `agents/evaluation_results/replan_experiment.csv`,
+  `replan_summary.csv`, `fleet_learning_experiment.csv`.
+- **Results:** nothing changed: 0 of 120 re-planned. Incident: 93%
+  re-planned, 9.0 min and 1.65 kg CO2 saved per re-plan, trips 15%+ late
+  down from 75% to 18%. Rain: none re-planned (77% late either way).
+  Congestion surge: 44% re-planned, 5.1 min saved per re-plan. Next
+  snapshot: none re-planned. Unreported incident: the second vehicle already
+  takes the fully informed route in 68% of trips, and vehicles 2-5 recover
+  94% of the gap.
+- **How to read it:** re-planning helps for local changes and not for
+  city-wide ones, because when every road slows by the same factor the best
+  road is still the best. The incident is put on the vehicle's route on
+  purpose and its 4x is assumed, so these are "what the loop does when
+  something hits the route", not how often that happens.
+
+### Live app: "On the road"
+- **What:** every planned route gets a section where the trip is driven
+  through a change: pick what happens, when, and whether the planner is
+  told. The page shows the decision and who made it, the promised time
+  against finishing the plan and against the re-plan, CO2, a map with the
+  driven part, the route taken, the route not taken, the incident and the
+  vehicle, the telemetry, and (when the planner is not told) what the next
+  five vehicles do. It says which numbers are assumed and which are GNN
+  predictions.
+- **Files:** `live_app.py`.
+- **Checked by:** automated app check, 3 scenarios x 5 kinds x told / not
+  told, LLM off: 150 of 150. One browser run with the LLM on: Peenya to
+  Rajajinagar, incident at 30% of the trip, 33.3 min finishing the plan
+  against 25.0 min re-planned (promised 22.3), decided by the LLM.
+
+### Two findings to carry forward
+- **The LLM agreed with the fixed rule every time it was asked** (16 of 16
+  on demo trips). All were faster and cleaner at once. Its contribution to
+  the re-plan decision is the explanation, so far; Phase 8 should measure
+  that rather than assume it.
+- **A late trip with no new information is correctly not re-planned.** The
+  rest of a best route is still the best route from any point on it.
+
+### Fixed along the way
+- `FeedbackStore.corrected()` raised on the GNN's float32 columns. Now goes
+  through float64; covered by a test.
+
+### Tests
+- `tests/test_feedback_loop.py`: 16 tests, no LLM, no torch.
 
 ---
 
@@ -374,12 +497,16 @@ Details: `CLAUDE.md` section 5.
   (`CLAUDE.md` 8.3).
 - **11 Oct 2026:** the Tsinghua shortest-path algorithm was promised to the
   review panel and is Phase 3 of the plan.
+- **13 Oct 2026:** a road incident is modelled as an assumed slowdown, not
+  through the GNN, because the GNN predicts incident roads to be faster
+  (`CLAUDE.md` 11.3). Always present it as an assumption.
 
 ## What comes next
 
-Phase 3 onward of the plan in `CLAUDE.md` section 8.2: the Tsinghua solver,
-the feedback loop with mid-trip disruptions, the remaining promises, the
-Review 3 package, then the paper work.
+Phases 1 to 4 of the plan in `CLAUDE.md` section 8.2 are done. Next is
+Phase 5: settle the remaining promises with the guide (the word
+"distributed" in the title, a small multi-stop version, vehicle-specific
+carbon, delivery deadlines), then the Review 3 package, then the paper work.
 
 ## Commits
 
@@ -393,4 +520,6 @@ Review 3 package, then the paper work.
 | `fdb8497` | 12 Oct | Evaluation re-run, regenerated dashboard, `CHANGELOG.md`, updated `README.md` and `CLAUDE.md`. |
 | `8885af5` | 13 Oct | Phase 3: Tsinghua BMSSP solver, solver option, tests, benchmark and results. |
 | `8b14c12` | 13 Oct | Live app: algorithm selector, Dijkstra vs BMSSP comparison panel, two-row headline figures. |
-| the commit after `8b14c12` | 13 Oct | Change log, `CLAUDE.md` section 10 and `README.md` for Phase 3 and the comparison panel. |
+| `2fc4eff` | 13 Oct | Change log, `CLAUDE.md` section 10 and `README.md` for Phase 3 and the comparison panel. |
+| `22013bf` | 14 Oct | Phase 4 code: closed feedback loop, disruption models, solver additions, re-plan experiment and results, app "On the road" section, tests. |
+| the commit after `22013bf` | 14 Oct | Change log, `CLAUDE.md` section 11 and `README.md` for Phase 4. |

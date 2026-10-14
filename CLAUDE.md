@@ -1269,16 +1269,16 @@ Before Review 3:
    10.** Implemented from the paper, selectable next to Dijkstra, verified
    against Dijkstra, benchmarked. It is 14-22x slower than Dijkstra on our
    graph, as expected at this size.
-4. **Close the feedback loop:** replay snapshots in time order as the "live
-   feed"; inject a mid-trip disruption (incident / rain) by editing snapshot
-   features and re-running the GNN (~0.2s); make the Execution agent's
-   re-plan flag trigger a real re-route from the vehicle's current node;
-   show old vs new route and the saving; log actual vs predicted per edge
-   and feed it back as a running correction. Justification for having no
-   live feed: trace-driven simulation on replayed historical data, with a
-   swappable snapshot source. Note snapshots are 2 hours apart and trips
-   take 15-70 minutes, so injected disruptions, not the clock, are the main
-   re-plan trigger.
+4. **Close the feedback loop — DONE 2026-10-13, see 11.** Mid-trip change
+   of conditions (GNN re-scoring for rain, a congestion surge or the next
+   snapshot; an assumed slowdown for an incident, which the GNN cannot
+   model), a real re-route from the vehicle's junction, old and new route
+   and the saving shown in the app, per-segment telemetry feeding a
+   correction store for later plans. Measured on 120 trips: it helps for
+   local changes (incident: 9.0 min saved per re-plan, 75% -> 18% of trips
+   15%+ late) and correctly does nothing for city-wide ones (rain, next
+   snapshot). Justification for having no live feed: trace-driven
+   simulation on recorded snapshots, with a swappable snapshot source.
 5. **Settle remaining promises with the guide:** "distributed" (worker
    processes or change the title); small OR-Tools multi-stop version;
    vehicle-specific carbon; delivery deadlines. State as out of scope /
@@ -1615,3 +1615,265 @@ in the app; it is asymptotically faster but, measured, slower at city scale,
 so Dijkstra remains the default. "Better than Dijkstra" should be stated as
 "asymptotically faster", not "faster in practice here".
 
+## 11. Phase 4 — the closed feedback loop (2026-10-13)
+
+### 11.1 What was open, and what closes it
+
+The architecture has always shown an arrow from Execution back to routing.
+In the code, `ExecutionAgent.run()` simulated a whole trip and only then set
+`replan_triggered`: a flag raised after the trip was over, which nothing
+read. Phase 4 adds the two loops that arrow stands for, in
+`agents/feedback_loop.py`:
+
+- **Short loop, within one trip** (`ClosedLoopExecutor`): the vehicle drives
+  its plan, conditions change part-way, the planner is told, and it decides
+  whether to re-route from the junction the vehicle is at.
+- **Long loop, across trips** (`FeedbackStore`, `fleet_learning()`): nobody
+  tells the planner anything. Vehicles report how long each segment took;
+  segments that take far longer than predicted get a correction factor, and
+  the next vehicle is planned on corrected costs.
+
+It is the Execution/Monitoring agent's job extended, not a seventh agent.
+`pipeline.run_full_pipeline` and the evaluation harness are unchanged, so
+9.6's numbers still stand; the loop is a separate stage used by the app and
+by `agents/replan_experiment.py`.
+
+**A late trip with no new information is not re-planned, and should not
+be.** If the roads have not changed, the rest of a lowest-cost route is
+still the lowest-cost route from any junction on it. Time already lost to
+ordinary delays cannot be bought back by re-routing; only new information
+about the roads ahead can. That is why the old flag could never have led
+anywhere, and why the loop needs a model of "conditions changed".
+
+### 11.2 Files
+
+| File | What it holds |
+|---|---|
+| `agents/feedback_loop.py` | `drive()`, `ClosedLoopExecutor`, `FeedbackStore`, `fleet_learning()`, a no-LLM smoke test |
+| `agents/disruptions.py` | world-level incident: `edge_at_fraction()`, `edges_near()`, `apply_incident()` (no torch) |
+| `gnn/snapshot_disruptions.py` | GNN-level changes: `with_rain()`, `with_congestion_surge()` |
+| `gnn/routing_solver.py` | new `path_totals(path)` and `reference_costs=` (11.5) |
+| `agents/execution_agent.py` | noise model extracted as `simulate_edge(row, rng)`; outputs unchanged (117 of 117 seeded runs identical) |
+| `agents/replan_experiment.py` | re-plan against no re-plan over many trips; writes three CSVs to `agents/evaluation_results/` |
+| `tests/test_feedback_loop.py` | 16 tests, no LLM, no torch |
+| `live_app.py` | section "On the road" (11.9) |
+
+### 11.3 What a "change" is — two kinds, and what each can claim
+
+There is no live traffic (8.1), so a change is a second set of per-edge
+costs: the world the plan was made on and the world after.
+
+**GNN-level**: edit the snapshot's features, run the GNN again, and the
+model says how the roads respond. Measured on the 2024-06-24 snapshots:
+
+| Change | How | What the GNN predicts |
+|---|---|---|
+| Rain, whole city | `weather_impact` = 0.6, `road_condition_score` - 0.06 | time x1.18 / x1.21 / x1.22 at 09:00 / 13:00 / 21:00; mean delay probability 0.66 -> 0.88, 0.49 -> 0.67, 0.33 -> 0.49; carbon and EV +1% to +5% |
+| Congestion surge on chosen edges | `congestion_index` -> 1.0 | on the surged edges, time x1.01 at 09:00 and 17:00 (already 0.98-0.99), x1.14 at 13:00, x1.28 at 21:00; other edges unchanged |
+| Next snapshot of the day | load it | 09:00 -> 11:00 x0.85, 15:00 -> 17:00 x1.24, 19:00 -> 21:00 x0.62 on expected time; half of all roads within a few percent of that factor |
+
+Caveats: rain is rare in training (`weather_impact` mean 0.013, s.d. 0.073)
+and absent from the test split (373 Clear, 8 Overcast), so the rain response
+cannot be checked against labelled rain data here. A surge has no effect at
+rush hour because congestion is already at the top of its range.
+
+**World-level**: `apply_incident()` multiplies time, carbon and EV energy on
+the affected edges by a stated factor (default 4) and raises their delay
+probability to at least 0.9. This is an **assumption, not a prediction**. It
+exists because **the GNN cannot model an incident**: raising
+`event_disruption` to 0.6 or 1.0 on a route's edges made it predict those
+edges 10-24% *faster* and less likely to be delayed (time x0.76-0.90). That
+feature is non-zero on 1.5% of edges and was never learned (7.2). Do not
+route incidents through the GNN; say "we assume a 4x slowdown".
+
+### 11.4 The re-plan decision
+
+At the change the loop prices two options on the new conditions: finish the
+planned route, or take the best route from the vehicle's junction (same
+weights the route was planned with). Deterministic rules first, in order;
+the LLM is asked only if none settles it:
+
+1. `same_route` — the best route from here is the rest of the plan.
+2. `ev_range` — hard rule. If finishing the plan is expected to need more
+   energy than the battery has left and the alternative fits, switch. Never
+   switch to a route that does not fit when the plan does.
+3. `dominated` — never switch to a route expected to be both slower and
+   more polluting.
+4. `small_gain` — under 5% better on the route's own weighted cost
+   (`REPLAN_MIN_GAIN_PCT`): not worth turning a vehicle around for.
+5. `llm` — weigh the time and CO2 changes against the request's priority.
+   With the LLM off, or unreachable, the answer is `policy` /
+   `policy_fallback`: switch, since rule 4 was passed.
+
+Both futures are then simulated, with **the same random numbers on every
+segment they share** (each segment's noise is seeded by the run seed and the
+segment). The difference between the two outcomes is the effect of the
+decision, not of luck. The report carries the decision, its rule and
+reasoning, both outcomes, the saving, and per-segment telemetry.
+
+One change per trip, applied when the vehicle reaches a junction; there is
+no continuous monitoring.
+
+### 11.5 Pricing a changed world: `reference_costs`
+
+`RoutingSolver` scales each objective to [0, 1] between its 1st and 99th
+percentile and clips. For re-planning that has two faults: the scale moves
+when the costs move, and a road already at the cap looks no worse after it
+becomes 4x slower. `RoutingSolver(costs_after, reference_costs=costs_before)`
+prices every edge in the original plan's units instead: an unchanged edge
+costs exactly what it did, and an edge whose prediction is now r times
+higher costs r times more, uncapped. With unchanged costs it reproduces the
+plain solver exactly (tested). Default behaviour is untouched.
+
+### 11.6 The long loop: `FeedbackStore`
+
+Per segment it keeps the ratios actual time / expected time that vehicles
+report (expected = the GNN's own, delays included). The correction factor is
+a shrunk mean, (2 + sum of ratios) / (2 + reports), and a factor within the
+deadband of 1.0 counts as 1.0. The deadband is derived from the noise model:
+the worst single report a healthy road can give is +10% jitter with a delay
+at its 2.0x maximum, a ratio of 2.2, which gives (2 + 2.2) / 3 = 1.4 — so
+0.4. One unlucky but normal report can never create a correction; a 4x
+incident reports at least 2.6 and clears it at once. `corrected(costs_df)`
+multiplies time, carbon and EV energy by the factor; `save()` / `load()`
+write JSON.
+
+Limits: corrections are per segment (nothing spreads to neighbouring
+roads); they are not persisted by the app; they are not fed into GNN
+retraining (out of scope, 8.2 item 5). **They also never expire, and that
+needs fixing before any real use:** once a segment is flagged, vehicles are
+routed around it, so no new reports arrive and the flag stays even after
+the road has cleared. An expiry time, or an occasional vehicle sent through
+to check, would be needed.
+
+### 11.7 Verification
+
+- `python tests/test_feedback_loop.py` — 16 of 16 pass (hand-built ladder
+  network plus one check on `sample_costs/`): `path_totals` equals
+  `find_route`; `reference_costs` changes nothing when costs are unchanged
+  and does not cap a slowed road; incident and ball construction; no change
+  -> no re-plan; an incident ahead is avoided and saves time on 40 of 40
+  seeds; an incident already passed changes nothing; the uninformed run's
+  outcome equals the informed run's counterfactual; EV hard rule both ways;
+  small gain not taken; paired and reproducible noise; the store ignores the
+  worst healthy report and learns a 4x incident; fleet learning finds the
+  informed route and learns nothing in an unchanged world.
+- `tests/test_bmssp.py` still 6 of 6 after the solver change, and 200 of
+  200 random routes (2 snapshots, 4 weightings) are identical to the
+  previous commit's solver, so 9.6 and every earlier result still hold.
+- App: automated check of "On the road", 3 scenarios x 5 kinds of change x
+  told / not told, LLM off — 150 of 150 checks pass. One run in the browser
+  with the LLM on (11.9).
+- Found and fixed along the way: `FeedbackStore.corrected()` raised on the
+  GNN's float32 columns (pandas refuses the float64 product); now covered by
+  a test.
+
+### 11.8 Does it help? (`agents/replan_experiment.py`, 120 trips)
+
+120 random trips of at least 10 minutes on 2024-06-24 (40 each at 09:00,
+13:00, 21:00; priorities rotated; mean 39 minutes, 67 segments). The change
+is reported to the planner 30% of the way into each trip. Decision by the
+fixed policy, so the run uses no tokens and is repeatable. Results in
+`agents/evaluation_results/replan_experiment.csv` and `replan_summary.csv`.
+
+| | nothing | incident (assumed 4x) | rain | surge | next snapshot |
+|---|---|---|---|---|---|
+| trips | 120 | 120 | 120 | 120 | 80 |
+| mean slowdown of the road ahead | 1.00 | 1.52 | 1.31 | 1.24 | 0.95 |
+| re-planned | 0% | 93% | 0% | 44% | 0% |
+| 15%+ late, finishing the plan | 0% | 75% | 77% | 46% | 1% |
+| 15%+ late, with the loop | 0% | 18% | 77% | 25% | 1% |
+| mean trip, finishing the plan (min) | 39.4 | 50.8 | 47.7 | 44.6 | 43.4 |
+| mean trip, with the loop (min) | 39.4 | 42.4 | 47.7 | 42.4 | 43.4 |
+| mean saved when re-planned (min) | - | 9.0 | - | 5.1 | - |
+| mean CO2 saved when re-planned (kg) | - | 1.65 | - | 0.61 | - |
+| re-plans that ended slower | - | 2.7% | - | 5.7% | - |
+
+(The last column has 80 trips because 21:00 has no later snapshot, so its
+means are not comparable with the others.)
+
+Why the loop did or did not re-plan: nothing 120 `same_route`; incident 112
+`policy`, 5 `small_gain`, 3 `same_route`; rain 85 `same_route`, 32
+`small_gain`, 3 `dominated`; surge 53 `policy`, 34 `same_route`, 32
+`small_gain`, 1 `dominated`; next snapshot 74 `same_route`, 5 `small_gain`,
+1 `dominated`. Surge by hour: 0% re-planned at 09:00, 42% at 13:00, 90% at
+21:00.
+
+Long loop (the same incident, never reported, five vehicles in a row, 120
+trips; `fleet_learning_experiment.csv`):
+
+| vehicle | mean trip (min) | same drive, no feedback | same drive, planner fully informed | on the informed route |
+|---|---|---|---|---|
+| 1 | 50.6 | 50.6 | 41.3 | 1% |
+| 2 | 43.3 | 50.7 | 41.6 | 68% |
+| 3 | 41.5 | 50.7 | 41.2 | 82% |
+| 4 | 41.6 | 51.1 | 41.5 | 90% |
+| 5 | 41.4 | 50.9 | 41.4 | 90% |
+
+Vehicles 2-5 recover 94% of the gap between never learning and being fully
+informed. The first vehicle on the informed route was the 2nd in 82 trips,
+the 3rd in 17, the 4th in 8, the 5th in 2. In 10 trips none of the five
+reached it: 8 settled on a different route that beat the original plan in
+all 8, and 2 stayed on the original plan, where the informed route was no
+faster anyway. 4.6% of vehicle 2-5 drives were slower than the same drive on
+the original plan.
+
+**Reading these honestly**
+- The control passes: with nothing changed, 0 of 120 trips were re-planned.
+- **Re-planning helps for local changes, not city-wide ones.** Rain slows
+  the road ahead by 31% and makes 77% of trips late, and the loop re-plans
+  none of them: when every road slows by about the same factor, the best
+  road is still the best. The same holds for the next snapshot, because the
+  hour is a city-wide multiplier in this dataset (7.2). This is a property
+  of the data as much as of the loop.
+- **The incident is placed on the vehicle's route by construction**, and its
+  4x is assumed. 93% is how the loop behaves when a change does hit the
+  route, not how often that happens. The saving scales with the assumed
+  slowdown.
+- The surge is the only local change that is a GNN prediction, and it only
+  bites off-peak.
+- A re-plan is a bet on expected values: 3-6% of them ended slower in the
+  paired simulation.
+- **The LLM added an explanation, not a different decision.** On 3 demo
+  trips x 3 priorities x incident and surge at 13:00, 16 cases reached the
+  LLM and it chose the same as the fixed policy in 16 of 16. All 16 were
+  faster *and* cleaner: in this data a slow road is also a dirty one, so a
+  real time-against-carbon trade-off at re-plan time is rare (in the
+  120-trip run, 156 of 165 re-plans were better on both, 8 traded one for
+  the other). Phase 8's ablation should report this, not assume the LLM
+  matters here.
+
+**What to tell the panel:** the loop is closed in simulation. A change on
+the road triggers a real re-route from the vehicle's position, with the old
+route, the new route and the saving shown, and vehicle telemetry feeds a
+correction store that later plans use. There is no live feed: a change is
+either the GNN re-scoring changed conditions (rain, congestion, next
+snapshot) or an assumed incident slowdown, because the GNN cannot model
+incidents. Not done: continuous monitoring, more than one change per trip,
+retraining the GNN from telemetry.
+
+### 11.9 Live app — "On the road"
+
+A section on every plan, between the baseline comparison and the algorithm
+comparison. A form chooses what happens (incident / rain / traffic build-up
+/ next traffic update / nothing), when (share of the trip driven), whether
+the planner is told, and for an incident where, how large and how slow.
+"Drive the trip" runs `run_loop()` -> `ClosedLoopExecutor` with the plan's
+route, weights, priority, vehicle and seed; the LLM is used if the plan was
+made with it. Shown: whether it re-planned, what decided it and why;
+promised time, the time finishing the plan, the time with the re-plan and
+CO2; which numbers are assumed and which are GNN predictions; a map (driven
+part, route taken, route not taken, incident, vehicle position); the
+telemetry table. With "Tell the planner" off, it also runs
+`fleet_learning()` for five following vehicles and tabulates them.
+
+Browser run, scenario 1 (Peenya -> Rajajinagar, 09:00, fastest), LLM on,
+incident 4x at the defaults: change at 6.7 min after 7 of 43 segments;
+promised 22.3 min; finishing the plan 33.3 min; with the re-plan 25.0 min
+(-8.3 min, -1.31 kg CO2); decided by the LLM ("Switch saves about 9
+minutes, aligning with fastest priority").
+
+A result is tied to the plan it was run on (`plan["token"]`) and disappears
+when a new route is planned. GNN re-scoring for rain and surge is cached
+(`predict_changed`). As before, restart Streamlit after changing anything
+under `gnn/` or `agents/`.
