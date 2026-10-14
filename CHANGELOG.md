@@ -604,4 +604,5 @@ the scope statement in 12.6), then the paper work (Phases 7-10).
 | `22013bf` | 14 Oct | Phase 4 code: closed feedback loop, disruption models, solver additions, re-plan experiment and results, app "On the road" section, tests. |
 | `dfa4f6b` | 14 Oct | Change log, `CLAUDE.md` section 11 and `README.md` for Phase 4. |
 | `91e5f33` | 14 Oct | Phase 5 code: vehicle types, deadlines, OR-Tools multi-stop, Dask runtime, experiments and results, app page and controls, tests. |
-| the commit after `91e5f33` | 14 Oct | Change log, `CLAUDE.md` section 12 (and the 11.3 correction), `README.md` for Phase 5. |
+| `774570b` | 14 Oct | Change log, `CLAUDE.md` section 12 (and the 11.3 correction), `README.md` for Phase 5. |
+| `27b4c6c` | 14 Oct | App pages named clearly (`live_app.py` entry point, `app_pages/`); commit table updated in the next commit. |
