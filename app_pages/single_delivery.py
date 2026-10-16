@@ -397,8 +397,10 @@ def run_loop(plan, costs_df, snap_df, snap_row, kind, when, ahead, hops, slowdow
     if kind == "incident":
         blocked = edges_near(costs_df, edge_at_fraction(path, edge_time, where), hops=hops)
         after = apply_incident(costs_df, blocked, slowdown=slowdown)
-        event = (f"A road incident is reported ahead on the planned route; traffic around it is about "
-                 f"{slowdown:g} times slower.")
+        event = ((f"A road incident is reported ahead on the planned route; traffic around it is about "
+                  f"{slowdown:g} times slower.") if told else
+                 (f"A road incident blocks part of the road ahead (traffic about {slowdown:g} times slower), "
+                  "but nobody reports it to the planner."))
         basis = "assumed"
     elif kind == "rain":
         after = for_vehicle(predict_changed(snap_row["file"], "rain"))

@@ -1,5 +1,8 @@
 # Bengaluru Logistics Framework — Project Context & Build Plan
 
+> **Continuing this project (handover of 16 Oct 2026):** read `HANDOVER.md` first. Sections 7-13 below record
+> everything done from 27 Sep to 16 Oct; `CHANGELOG.md` lists each change.
+
 This file is project memory for Claude Code. Read it fully before making changes.
 
 **Every change and fix is also listed, newest first, in `CHANGELOG.md` — add an
@@ -1290,9 +1293,10 @@ Before Review 3:
    up as future work (12.6), for the guide to confirm: Neo4j, LangGraph,
    30-second live rebuild, GNN retraining from feedback, edge-cloud
    deployment.
-6. **Review 3 package:** deck (mapping slide from Review 1 agent names to
-   the current six, corrected data claims, measured audit, Tsinghua
-   benchmark, loop demo, scope statement) and rehearsed demo scenarios.
+6. **Review 3 package — DONE 2026-10-14, see 13.** Deck in the PES
+   template (19 slides, speaker notes, native charts) in the team folder,
+   demo script with measured numbers in `docs/review3_demo_script.md`,
+   audit re-scored on the same checklist (60% -> 72% of the nine stages).
 
 For the paper:
 7. **Strengthen the GNN:** baseline table (linear, GBM, MLP, GraphSAGE);
@@ -2142,3 +2146,79 @@ to three vehicles (three, because only the palette's first three colours
 are validated as distinguishable everywhere on a map), and shows the
 comparison, a map of each vehicle's round and per-stop expected and
 simulated arrivals.
+
+## 13. Phase 6 — the Review 3 package (2026-10-14)
+
+### 13.1 What was made
+
+- **Deck:** `ppt&docs/Review3/166_Capstone_Phase3_Review3.pptx` (and a PDF
+  export) in the team folder `E:/CollegeWork/CAPSTONE/SEM7/ppt&docs/`, NOT in
+  git (it carries the team's photos). 19 slides, 20 x 11.25 in, built from
+  the team's own Review 1 file so it keeps the PES template: the title/team
+  slide, problem statement and thank-you slide are the template's; every
+  other slide copies the template's orange arcs and PES logo. New text uses
+  Cambria (titles, amber F59E0B as in the template) and Calibri: the
+  template's Canva fonts (Open Sans Bold Italics, Arvo Italics, Canva Sans)
+  are not installed on Office machines and made the old slides overflow.
+  Charts are native PowerPoint charts (editable). Every slide has speaker
+  notes. The builder is `ppt&docs/Review3/build_review3.py` (python-pptx;
+  needs the Review 1 .pptx as input); rendered for checking through
+  PowerPoint COM (`Slide.Export`), since LibreOffice is not installed here.
+- **Slides:** title · problem statement · since Review 2 (six stat cards) ·
+  the system as built (diagram; future work dashed) · Review 1 agents ->
+  the six · what we measured and what it corrected · completion audit chart
+  · routing fixes + re-evaluation chart · Tsinghua (log-scale benchmark) ·
+  the closed loop (how) · the closed loop (results chart) · vehicle types
+  and deadlines · multi-stop chart · distributed runtime · live demo ·
+  limitations · scope (built / future work) · roadmap to the paper · thank
+  you.
+- **Demo script:** `docs/review3_demo_script.md` (in git): preparation, four
+  demo steps with the numbers measured with the LLM on and off, and the
+  questions the panel is likely to ask with honest answers.
+- **App:** with "Tell the planner" off, the incident message no longer says
+  the incident "is reported" (found while measuring the demo).
+
+### 13.2 What the Review 2 deck said that Review 3 corrects
+
+The Review 2 deck (28 Sep, `ppt&docs/Review2_28sept/`) was read in full.
+Slide "what we measured, and what it corrected" addresses:
+- "Spatio-Temporal GNN on real Bengaluru traffic" -> TransformerConv on
+  single snapshots; real values on 3.2% of segments.
+- Completion slide "GNN: ST-GCN / TGN — Done", "Carbon-Aware Optimizer:
+  OR-Tools CVRP — Done", "Agentic AI: Fleet, Warehouse, EV, ESG agents —
+  LangGraph — Done": none of these was in the code at Review 2. OR-Tools is
+  built now (12.4); LangGraph is future work; the agents are the six (team
+  decision 2026-10-07).
+- Results slide "-5.4 to -12.7% carbon, +6.6 to +13% time vs the speed
+  baseline" came from the pre-Phase-2 solver (four routing bugs). Current,
+  on expected values: -3.0% CO2, +6.6% time (9.6).
+- Its HLD still showed Truck/Fleet/Warehouse/EV/ESG agents and Neo4j; the
+  new "system as built" diagram replaces it.
+
+### 13.3 Audit re-scored (same checklist as 7, 2026-10-14)
+
+Only items whose status changed, each backed by a test or run:
+
+| Stage | 11 Oct | 14 Oct | Change |
+|---|---|---|---|
+| Ingestion | 1/5 | 1.5/5 | feedback intake partial (telemetry corrects later plans, not the data layer) |
+| Agent decisions | 6/10 | 9/10 | Tsinghua algorithm, multi-stop routes, deadlines |
+| Carbon optimisation | 4/7 | 6/7 | vehicle-specific carbon, OR-Tools CVRP (Pareto selection still absent) |
+| Execution and feedback | 3/7 | 5/7 | acting on re-plans, feedback loop (retraining, real telemetry absent) |
+| ESG dashboard | 7/11 | 7.5/11 | what-if disruption demo complete |
+| Distributed computing | 0.5/3 | 1.5/3 | worker processes over TCP on one machine (1); multi-node partial (0.5) |
+| Tests and CI | 1.5/4 | 2/4 | pytest-compatible suite partial (35 tests, run as scripts; no pytest/CI) |
+| Documentation | 1/4 | 2/4 | README (CHANGELOG too) |
+
+Unchanged: data sources 6/9, feature engineering 4.5/5, graph construction
+3.5/5, GNN 4/6, evaluation 4/7 (the new experiments do not cover the
+missing ablations or stronger routing baseline). **Nine stages: 39 -> 47 of
+65 (60% -> 72%). With cross-cutting promises: 46 -> 56.5 of 83 (55% ->
+68%).**
+
+### 13.4 Not done in Phase 6
+
+The deck was not rehearsed with the team or checked against a department
+template for Review 3 (none was available; it follows the Review 1/2
+format). Slide timing: about 20-25 minutes for 19 slides; slides 2, 10 and
+16 can be skipped for a 15-minute slot.

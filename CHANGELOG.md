@@ -18,6 +18,61 @@ since the original two commits.
 
 ---
 
+## 16 Oct 2026 — Handover
+
+- **What:** `HANDOVER.md`: where everything is (branch, Drive data, deck,
+  exported chat), setup steps, what is done (Phases 1-6), what is next
+  (Phases 7-10 with estimates and Colab advice), the working rules, how to
+  continue with Claude Code, open decisions and a security note. README and
+  `CLAUDE.md` point to it.
+- **Chat export:** the whole working session (27 Sep - 16 Oct) exported to
+  `handover/` on Aayan's machine, outside git: `chat_conversation.md`
+  (readable) and `chat_transcript_full.jsonl` (complete). The three Groq
+  keys pasted during development are redacted; they should be revoked.
+- **Why:** Aayan is away from 16 Oct; the team continues from here.
+
+---
+
+## 14 Oct 2026 — Phase 6: the Review 3 package
+
+Details: `CLAUDE.md` section 13.
+
+### Review 3 deck
+- **What:** 19 slides in the PES template, built from the team's Review 1
+  file: since Review 2 at a glance, the system as built, Review 1 agents ->
+  the six, what we measured and what it corrected, completion audit, routing
+  fixes and re-evaluation, Tsinghua benchmark, the closed loop (how and
+  results), vehicle types and deadlines, multi-stop, distributed runtime,
+  live demo, limitations, scope, roadmap. Native (editable) charts and
+  speaker notes on every slide.
+- **Where:** `ppt&docs/Review3/166_Capstone_Phase3_Review3.pptx` and `.pdf`
+  in the team folder, with the builder `build_review3.py`. Not in git: it
+  has the team's photos.
+- **Why these slides:** the Review 2 deck (read in full) marked OR-Tools,
+  LangGraph and an ST-GNN as done and reported results from the old solver;
+  Review 3 corrects those openly and shows what has been built and measured
+  since.
+- **Checked by:** every slide rendered through PowerPoint and inspected
+  (overlaps, overflow, labels fixed); the file passes the PowerPoint skill's
+  validator against the template.
+
+### Demo script
+- **What:** `docs/review3_demo_script.md`: preparation, four demo steps with
+  numbers measured with the LLM on and off, and likely panel questions with
+  honest answers.
+- **Checked by:** each step run through the app's automated check (LLM off)
+  and once in the browser (LLM on).
+
+### Audit re-scored
+- Same checklist as 11 Oct, only changed items moved: nine stages 60% ->
+  72%, all promises 55% -> 68% (`CLAUDE.md` 13.3).
+
+### App: wording when the planner is not told
+- With "Tell the planner" off, the incident message said the incident "is
+  reported". It now says nobody reports it. `app_pages/single_delivery.py`.
+
+---
+
 ## 14 Oct 2026 — The two app pages named clearly
 
 - **What:** `streamlit run live_app.py` now opens a sidebar with two clearly
@@ -583,10 +638,11 @@ Details: `CLAUDE.md` section 5.
 
 ## What comes next
 
-Phases 1 to 5 of the plan in `CLAUDE.md` section 8.2 are done. Next is
-Phase 6, the Review 3 package (deck with the Review 1 -> current agent
-mapping, corrected claims, audit, Tsinghua benchmark, the loop, Phase 5 and
-the scope statement in 12.6), then the paper work (Phases 7-10).
+Phases 1 to 6 of the plan in `CLAUDE.md` section 8.2 are done. Next is the
+paper work: Phase 7 (strengthen the GNN: baselines, forecasting version,
+real vs interpolated accuracy), Phase 8 (paper-grade evaluation), Phase 9
+(pytest and CI), Phase 10 (the paper). Rehearse the Review 3 demo with
+`docs/review3_demo_script.md`.
 
 ## Commits
 

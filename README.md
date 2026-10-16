@@ -10,6 +10,8 @@ Design rule used throughout: **plain code computes every number; the LLM only
 makes judgment calls**, and code-enforced rules stop the LLM from getting
 facts wrong.
 
+**Continuing this project? Start with [`HANDOVER.md`](HANDOVER.md).**
+
 ## How it works
 
 ```
@@ -255,7 +257,13 @@ section 10 lists the three places the code differs from the paper.
 - No pytest installation or CI yet (Phase 9); the tests run as scripts.
 
 `CLAUDE.md` section 7 has the full audit, per-stage completion scores and the
-list of known defects.
+list of known defects; section 13.3 re-scores it after Phases 2-5.
+
+## Review 3
+
+The demo script, with measured numbers and likely panel questions, is
+`docs/review3_demo_script.md`. The deck lives in the team folder (it has the
+team's photos, so it is not in git).
 
 ## Team
 
