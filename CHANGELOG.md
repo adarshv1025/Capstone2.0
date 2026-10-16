@@ -662,3 +662,5 @@ real vs interpolated accuracy), Phase 8 (paper-grade evaluation), Phase 9
 | `91e5f33` | 14 Oct | Phase 5 code: vehicle types, deadlines, OR-Tools multi-stop, Dask runtime, experiments and results, app page and controls, tests. |
 | `774570b` | 14 Oct | Change log, `CLAUDE.md` section 12 (and the 11.3 correction), `README.md` for Phase 5. |
 | `27b4c6c` | 14 Oct | App pages named clearly (`live_app.py` entry point, `app_pages/`); commit table updated in the next commit. |
+| `6746fca` | 14 Oct | Change log commit table. |
+| `5855059` | 16 Oct | Phase 6 (demo script, app wording fix, `CLAUDE.md` 13) and `HANDOVER.md`. |
