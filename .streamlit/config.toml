@@ -1,0 +1,59 @@
+# Native Streamlit theme for the logistics app. ui_theme.py adds the layout and component styling on top.
+#
+# Neutrals and series colours come from the validated dataviz palette; the accent is its blue (series slot 1),
+# which the app uses for "our system" (the multi-agent route). Red is kept for critical states only.
+# Both modes are defined, so the app follows the viewer's system / Streamlit theme setting.
+
+[client]
+toolbarMode = "minimal"            # hides the "Deploy" button; nothing in this project is deployed from the toolbar
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+font = "sans-serif"
+linkUnderline = false
+
+[theme.light]
+primaryColor = "#256abf"
+backgroundColor = "#f9f9f7"
+secondaryBackgroundColor = "#f1f0ec"
+textColor = "#0b0b0b"
+linkColor = "#1c5cab"
+blueColor = "#2a78d6"
+greenColor = "#0ca30c"
+orangeColor = "#ec835a"
+yellowColor = "#fab219"
+redColor = "#d03b3b"
+blueTextColor = "#1c5cab"
+greenTextColor = "#006300"
+orangeTextColor = "#a3461c"
+yellowTextColor = "#7a5200"
+redTextColor = "#b02a2a"
+blueBackgroundColor = "rgba(37, 106, 191, 0.08)"
+greenBackgroundColor = "rgba(12, 163, 12, 0.09)"
+orangeBackgroundColor = "rgba(236, 131, 90, 0.12)"
+yellowBackgroundColor = "rgba(250, 178, 25, 0.14)"
+redBackgroundColor = "rgba(208, 59, 59, 0.09)"
+
+[theme.dark]
+primaryColor = "#3987e5"
+backgroundColor = "#0d0d0d"
+secondaryBackgroundColor = "#1a1a19"
+textColor = "#f0efec"
+linkColor = "#6da7ec"
+blueColor = "#3987e5"
+greenColor = "#0ca30c"
+orangeColor = "#ec835a"
+yellowColor = "#fab219"
+redColor = "#e66767"
+blueTextColor = "#6da7ec"
+greenTextColor = "#4cc24c"
+orangeTextColor = "#f0a07e"
+yellowTextColor = "#fab219"
+redTextColor = "#f08a8a"
+blueBackgroundColor = "rgba(57, 135, 229, 0.14)"
+greenBackgroundColor = "rgba(12, 163, 12, 0.14)"
+orangeBackgroundColor = "rgba(236, 131, 90, 0.14)"
+yellowBackgroundColor = "rgba(250, 178, 25, 0.14)"
+redBackgroundColor = "rgba(230, 103, 103, 0.14)"
