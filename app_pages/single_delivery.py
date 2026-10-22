@@ -30,6 +30,7 @@ Run:
 """
 
 import glob
+import html
 import json
 import os
 import sys
@@ -53,18 +54,16 @@ from streamlit_folium import st_folium  # noqa: E402
 from app_common import (BENGALURU_CENTER, CHECKPOINT_DIR, EV_REFERENCE_KWH, GRAPH_DIR, SNAPSHOT_DIR,  # noqa: E402
                         draw_route, load_graph, load_predictor, load_snapshot_index, missing_data, nearest_node,
                         node_label, predict_costs)
+import ui_theme as ui  # noqa: E402
 from disruptions import apply_incident, edge_at_fraction, edges_near  # noqa: E402
 from routing_solver import DELAY_EXTRA_TIME_RANGE, RoutingSolver, canonical_edges  # noqa: E402
 from schemas import DeliveryRequest, Vehicle  # noqa: E402
 from snapshot_disruptions import with_congestion_surge, with_rain  # noqa: E402
 from vehicles import GRID_KG_CO2_PER_KWH, VEHICLE_TYPES, costs_for_vehicle  # noqa: E402
 
-# Same fixed slot order as agents/dashboard.py, so both dashboards read alike.
-COLORS = {
-    "multi_agent": "#2a78d6",
-    "baseline_time_only": "#eb6834",
-    "baseline_carbon_only": "#1baf7a",
-}
+# Same fixed slot order as agents/dashboard.py, so both dashboards read alike (blue is "our system");
+# the steps follow the theme (ui_theme.TOKENS), so the map, table and charts always share one colour per route.
+COLORS = ui.route_colors()
 LABELS = {
     "multi_agent": "Multi-agent route",
     "baseline_time_only": "Fastest baseline (time only)",
@@ -112,7 +111,7 @@ RULE_LABELS = {
 # Map ink for "On the road". The route in use keeps the multi-agent blue;
 # what was driven and what was abandoned are neutral; red is the reserved
 # "critical" status colour and always comes with a warning marker.
-LOOP_COLORS = {"driven": "#52514e", "taken": "#2a78d6", "not_taken": "#898781", "incident": "#d03b3b"}
+LOOP_COLORS = {"driven": ui.tokens()["ink2"], "taken": COLORS["multi_agent"], "not_taken": "#898781", "incident": "#d03b3b"}
 
 # Same noise model as agents/execution_agent.py, used here only to turn the
 # per-segment delay probabilities into numbers a user can act on. The route-
@@ -221,17 +220,17 @@ def route_summary(path, rows, total_time_s, total_carbon_kg, total_ev_pct, edge_
 
 
 def build_map(nodes_df, edge_geom, src, dst, plan):
-    fmap = folium.Map(location=BENGALURU_CENTER, zoom_start=11, tiles="OpenStreetMap",
-                      control_scale=True)
+    fmap = ui.style_map(folium.Map(location=BENGALURU_CENTER, zoom_start=11, tiles="OpenStreetMap",
+                                   control_scale=True, zoom_control=True))
 
-    # Named depots / EV stations as reference points.
+    # Named depots / EV stations as reference points (small, so the routes carry the colour).
+    ring = "#ffffff"                                  # the basemap is light in both themes
     for idx, row in nodes_df[nodes_df["name"] != ""].iterrows():
         is_ev = row["category"] == "ev_station"
         folium.CircleMarker(
-            (row.lat, row.lon), radius=5, weight=1,
-            color="#1baf7a" if is_ev else "#52514e",
-            fill=True, fill_opacity=0.8,
-            tooltip=f"{row['name']} (node {idx})",
+            (row.lat, row.lon), radius=5, weight=1.5,
+            color=ring, fill=True, fill_color=ui.tokens()["s_aqua"] if is_ev else ui.tokens()["muted"], fill_opacity=1,
+            tooltip=f"{row['name']} ({'EV station' if is_ev else 'depot'}, node {idx})",
         ).add_to(fmap)
 
     bounds = []
@@ -246,12 +245,11 @@ def build_map(nodes_df, edge_geom, src, dst, plan):
             bounds += draw_route(fmap, r["rows"], edge_geom, COLORS["multi_agent"],
                                  LABELS["multi_agent"], weight=7)
 
-    for idx, color, label in ((src, "green", "Source"), (dst, "red", "Destination")):
+    for idx, kind, letter, label in ((src, "source", "A", "Source"), (dst, "dest", "B", "Destination")):
         if idx is not None:
             row = nodes_df.iloc[idx]
             folium.Marker((row.lat, row.lon), tooltip=f"{label}: {node_label(nodes_df, idx)}",
-                          icon=folium.Icon(color=color, icon="flag" if label == "Destination" else "play")
-                          ).add_to(fmap)
+                          icon=ui.pin(letter, kind)).add_to(fmap)
             bounds.append((row.lat, row.lon))
 
     if len(bounds) >= 2:
@@ -449,7 +447,7 @@ def run_loop(plan, costs_df, snap_df, snap_row, kind, when, ahead, hops, slowdow
 def build_loop_map(nodes_df, edge_geom, plan, loop):
     report = loop["report"]
     replanned = report["decision"]["replan"]
-    fmap = folium.Map(location=BENGALURU_CENTER, zoom_start=11, tiles="OpenStreetMap", control_scale=True)
+    fmap = ui.style_map(folium.Map(location=BENGALURU_CENTER, zoom_start=11, tiles="OpenStreetMap", control_scale=True))
     bounds = draw_route(fmap, loop["driven_rows"], edge_geom, LOOP_COLORS["driven"], "Driven before the change", weight=6)
     if replanned:
         bounds += draw_route(fmap, loop["planned_rest_rows"], edge_geom, LOOP_COLORS["not_taken"],
@@ -471,17 +469,17 @@ def build_loop_map(nodes_df, edge_geom, plan, loop):
         lat = sum(pt[0] for pt in incident_points) / len(incident_points)
         lon = sum(pt[1] for pt in incident_points) / len(incident_points)
         folium.Marker((lat, lon), tooltip=f"Incident: traffic {loop['slowdown']:g} times slower",
-                      icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa")).add_to(fmap)
+                      icon=ui.pin("!", "incident")).add_to(fmap)
 
-    for idx, color, icon, label in ((plan["src"], "green", "play", "Source"), (plan["dst"], "red", "flag", "Destination")):
+    for idx, kind, letter, label in ((plan["src"], "source", "A", "Source"), (plan["dst"], "dest", "B", "Destination")):
         row = nodes_df.iloc[idx]
         folium.Marker((row.lat, row.lon), tooltip=f"{label}: {node_label(nodes_df, idx)}",
-                      icon=folium.Icon(color=color, icon=icon)).add_to(fmap)
+                      icon=ui.pin(letter, kind)).add_to(fmap)
         bounds.append((row.lat, row.lon))
     here = nodes_df.iloc[report["position"]["node"]]
     folium.Marker((here.lat, here.lon),
                   tooltip=f"The vehicle when conditions changed ({report['position']['elapsed_s'] / 60:.1f} min in)",
-                  icon=folium.Icon(color="blue", icon="truck", prefix="fa")).add_to(fmap)
+                  icon=ui.pin("V", "vehicle")).add_to(fmap)
     if len(bounds) >= 2:
         fmap.fit_bounds(bounds, padding=(30, 30))
     return fmap
@@ -491,7 +489,8 @@ def build_loop_map(nodes_df, edge_geom, plan, loop):
 # UI
 # ══════════════════════════════════════════════════════════════════════════
 
-st.set_page_config(page_title="Bengaluru Logistics – Live Planner", layout="wide")
+st.set_page_config(page_title="Route planner · Bengaluru Logistics", page_icon=":material/alt_route:", layout="wide")
+ui.inject()
 
 missing = missing_data()
 if missing:
@@ -544,18 +543,26 @@ def load_scenario():
 
 
 # ---- Sidebar -------------------------------------------------------------
+CIRCLED = str.maketrans("①②③④⑤⑥", "123456")
+
+
+def scenario_label(key: str) -> str:
+    """Display name of a demo scenario. The circled digits stay in the keys (the docs and the deck use them)."""
+    if key == "—":
+        return "None: set the trip yourself"
+    if not any(c in key for c in "①②③④⑤⑥"):    # already a display label (idempotent, so applying it twice is harmless)
+        return key
+    number, _, rest = key.translate(CIRCLED).partition(" ")
+    title, _, trip = rest.partition(" — ")
+    return f"{number} · {title}: {trip}" if trip else f"{number} · {title}"
+
+
 with st.sidebar:
-    st.header("Plan a delivery")
-    try:
-        st.page_link("app_pages/fleet_rounds.py", label="Several drop-offs per vehicle? Multi-stop fleet planner",
-                     icon="🗺️")
-    except Exception:  # page run on its own (not through live_app.py): no page list to link into
-        pass
+    st.selectbox("Quick start scenario", ["—"] + list(DEMO_SCENARIOS), key="scenario", on_change=load_scenario,
+                 format_func=scenario_label,
+                 help="Loads a prepared trip with every setting below. Press Plan route to run it.")
 
-    st.selectbox("🎬 Demo scenario (loads all settings below)", ["—"] + list(DEMO_SCENARIOS),
-                 key="scenario", on_change=load_scenario)
-
-    st.subheader("1 · Source & destination")
+    ui.step(1, "Route")
     click_target = st.radio("A click on the map sets the…", ["Source", "Destination"],
                             horizontal=True)
     pick = st.selectbox("…or choose a named place", ["—"] + list(named_options),
@@ -565,17 +572,17 @@ with st.sidebar:
         ss.src = named_options[pick]; ss.plan = None
     if c2.button("Set as destination", width="stretch", disabled=pick == "—"):
         ss.dst = named_options[pick]; ss.plan = None
-    if st.button("↔ Swap", width="stretch"):
+    if st.button("Swap", icon=":material/swap_vert:", width="stretch"):
         ss.src, ss.dst = ss.dst, ss.src; ss.plan = None
-    st.caption(f"**Source:** {node_label(nodes_df, ss.src) if ss.src is not None else '—'}")
-    st.caption(f"**Destination:** {node_label(nodes_df, ss.dst) if ss.dst is not None else '—'}")
+    ui.ends(node_label(nodes_df, ss.src) if ss.src is not None else "—",
+            node_label(nodes_df, ss.dst) if ss.dst is not None else "—")
 
-    st.subheader("2 · Traffic conditions")
+    ui.step(2, "Traffic conditions")
     snap_label = st.selectbox(f"Traffic snapshot ({len(snap_df)} available)", snap_df["label"],
                               key="snap_label")
     snap_row = snap_df[snap_df["label"] == snap_label].iloc[0]
 
-    st.subheader("3 · Priority & vehicle")
+    ui.step(3, "Priority and vehicle")
     priority = st.selectbox("Priority", ["fastest", "balanced", "greenest"], key="priority_sel")
     custom = st.text_input("Or describe it in words (optional)", key="custom_text",
                            placeholder="e.g. urgent medicine, but avoid heavy traffic")
@@ -597,7 +604,7 @@ with st.sidebar:
                                    help="A hard limit: if the planned route is expected to arrive later, the "
                                         "planner moves toward faster weights until it fits.")
 
-    st.subheader("4 · Planner")
+    ui.step(4, "Planner")
     use_agents = st.toggle("Use multi-agent LLM pipeline", key="use_agents",
                            help="Off = deterministic solver only (instant, no API calls).")
     seed = st.number_input("Simulation seed", 0, 10_000, step=1, key="seed",
@@ -606,12 +613,15 @@ with st.sidebar:
         "Shortest-path algorithm", list(ALGORITHM_OPTIONS), key="algorithm",
         help="Both find a minimum-cost route. BMSSP is the Duan et al. (Tsinghua) algorithm, "
              "asymptotically faster than Dijkstra but slower at this graph size.")]
-    go = st.button("🚚 Plan route", type="primary", width="stretch",
+    go = st.button("Plan route", icon=":material/play_arrow:", type="primary", width="stretch",
                    disabled=ss.src is None or ss.dst is None or ss.src == ss.dst)
-
-    st.subheader("5 · Disruption on the road")
     st.caption("After planning, add an incident, rain or a traffic build-up part-way through the trip and see "
-               "whether the system re-plans: [On the road](#on-the-road), in the main page below the route.")
+               "whether the system re-plans: [On the road](#on-the-road), below the route.")
+    try:
+        st.page_link("app_pages/fleet_rounds.py", label="Fleet planner", icon=":material/local_shipping:",
+                     help="Several drop-offs per vehicle")
+    except Exception:  # page run on its own (not through live_app.py): no page list to link into
+        pass
 
 # ---- Run -----------------------------------------------------------------
 costs_df, infer_s = predict_costs(snap_row["file"])
@@ -632,94 +642,107 @@ if plan and not plan["use_agents"]:
     LABELS = {**LABELS, "multi_agent": "Solver-only route (no LLM)"}
 
 # ---- Header ---------------------------------------------------------------
-st.title("Bengaluru Logistics — Live Route Planner")
-st.caption(
-    f"Live GNN v3 inference on **{snap_label}** — {len(costs_df):,} road segments scored in "
-    f"{infer_s * 1000:.0f} ms. Pick points, then press **Plan route**."
-)
+ui.header(
+    "Route planner",
+    "A graph neural network scores every road in the network for time, delay risk, CO₂ and EV energy; "
+    "six agents then plan, check and report the route.",
+    chips=[ui.chip("Snapshot", f"{snap_row['date']} {int(snap_row['hour']):02d}:00", "schedule", accent=True),
+           ui.chip(str(snap_row["weather"]), symbol="cloud"),
+           ui.chip("Scored", f"{len(costs_df):,} roads in {infer_s * 1000:.0f} ms", "bolt")],
+    eyebrow="Bengaluru logistics")
 if ss.plan and "error" in ss.plan:
     st.error(ss.plan["error"])
 if ss.scenario in DEMO_SCENARIOS:
-    st.info(f"**{ss.scenario}** — {DEMO_SCENARIOS[ss.scenario]['talk']}", icon="🎬")
+    ui.note(f"<b>{html.escape(scenario_label(ss.scenario))}</b><br>{html.escape(DEMO_SCENARIOS[ss.scenario]['talk'])}", "lightbulb")
 
-# ---- Map ------------------------------------------------------------------
-fmap = build_map(nodes_df, edge_geom, ss.src, ss.dst, plan)
-map_state = st_folium(fmap, height=520, use_container_width=True,
-                      returned_objects=["last_clicked"], key="map")
-click = (map_state or {}).get("last_clicked")
-if click and click != ss.last_click:
-    ss.last_click = click
-    idx = nearest_node(nodes_df, click["lat"], click["lng"])
-    if click_target == "Source":
-        ss.src = idx
-    else:
-        ss.dst = idx
-    ss.plan = None
-    st.rerun()
+# ---- Map (left) and the headline result (right) ------------------------------
+if plan:
+    routes, trace = plan["routes"], plan["trace"]
+    ma = routes["multi_agent"]
+    col_map, col_res = st.columns([3, 2], gap="large")
+else:
+    col_map, col_res = st.container(), None
 
-legend = " &nbsp; ".join(
-    f"<span style='color:{COLORS[k]};font-weight:600'>━</span> {LABELS[k]}" for k in COLORS)
-st.markdown(legend + " &nbsp; <span style='color:#1baf7a'>●</span> EV station"
-                     " &nbsp; <span style='color:#52514e'>●</span> depot", unsafe_allow_html=True)
+with col_map:
+    fmap = build_map(nodes_df, edge_geom, ss.src, ss.dst, plan)
+    map_state = st_folium(fmap, height=560, use_container_width=True,
+                          returned_objects=["last_clicked"], key="map")
+    click = (map_state or {}).get("last_clicked")
+    if click and click != ss.last_click:
+        ss.last_click = click
+        idx = nearest_node(nodes_df, click["lat"], click["lng"])
+        if click_target == "Source":
+            ss.src = idx
+        else:
+            ss.dst = idx
+        ss.plan = None
+        st.rerun()
+
+    ui.legend(([(LABELS["multi_agent"], COLORS["multi_agent"], "solid"),
+                (LABELS["baseline_time_only"], COLORS["baseline_time_only"], "dash"),
+                (LABELS["baseline_carbon_only"], COLORS["baseline_carbon_only"], "dash")] if plan else [])
+              + [("EV station", ui.tokens()["s_aqua"], "dot"), ("Depot", ui.tokens()["muted"], "dot")])
 
 if not plan:
-    st.info("Click the map (or pick named places in the sidebar) to set a source and destination, "
-            "then press **Plan route**.")
+    st.markdown(
+        '<div class="empty"><div class="t">Plan a route in three steps</div><ol>'
+        "<li>Choose a trip: click the map, pick named places, or load a quick start scenario.</li>"
+        "<li>Choose the traffic snapshot, the priority and the vehicle.</li>"
+        "<li>Press <b>Plan route</b>, then try a disruption under <b>On the road</b>.</li></ol></div>",
+        unsafe_allow_html=True)
     st.stop()
 
-routes, trace = plan["routes"], plan["trace"]
-ma = routes["multi_agent"]
-
 # ---- Headline metrics ------------------------------------------------------
-st.subheader(f"Planned route — priority: “{plan['priority']}”")
-st.caption(
-    "Routes on this page were searched with "
-    + ("the **Tsinghua BMSSP** algorithm" if plan["algorithm"] == "bmssp" else "**Dijkstra**")
-    + ". Both algorithms are compared on this trip further down the page."
-)
-# Two rows of three: six in one row truncates the values ("16.6 ...") on a
-# laptop-width or split-screen window.
-m = st.columns(3) + st.columns(3)
-m[0].metric("Distance", f"{ma['distance_km']:.1f} km", f"{ma['edges']} road segments", delta_color="off")
-m[1].metric("Planned time", f"{ma['time_min']:.1f} min", help="GNN-predicted time with no delays.")
-m[2].metric("Expected with delays", f"{ma['expected_min']:.1f} min",
-            f"+{ma['expected_min'] - ma['time_min']:.1f} min", delta_color="inverse",
-            help="Planned time plus each segment's delay probability × average delay impact.")
-m[3].metric("90% arrive within", f"{ma['p90_min']:.1f} min",
-            help="90th percentile of 2,000 simulated drives — a safe time to promise.")
-vtype = plan.get("vehicle_type")
-if vtype is None:
-    m[4].metric("CO₂", f"{ma['carbon_kg']:.2f} kg", help="For the GNN's reference vehicle (0.27 kg CO₂/km in free flow).")
-elif VEHICLE_TYPES[vtype].is_ev:
-    m[4].metric("CO₂ (grid electricity)", f"{ma['carbon_kg']:.2f} kg",
-                help=f"Electricity used × the CEA grid factor ({GRID_KG_CO2_PER_KWH} kg/kWh, FY 2023-24). No "
-                     "tailpipe CO₂; transmission and charging losses not included.")
-else:
-    m[4].metric("CO₂ (tailpipe)", f"{ma['carbon_kg']:.2f} kg",
-                help=f"{VEHICLE_TYPES[vtype].label}: {VEHICLE_TYPES[vtype].kg_co2_per_km} kg CO₂/km "
-                     "(India GHG Program, 2015), with the GNN's congestion and weather effects.")
-if plan["is_ev"]:
-    m[5].metric("EV energy", f"{ma['ev_kwh']:.2f} kWh", help="Expected battery use including typical delays.")
-else:
-    m[5].metric("EV energy", "—", help="Not an electric vehicle.")
+with col_res:
+    st.markdown("### Planned route")
+    st.markdown(
+        ui.chip("Priority", plan["priority"], accent=True) + " "
+        + ui.chip("Search", "Tsinghua BMSSP" if plan["algorithm"] == "bmssp" else "Dijkstra"),
+        unsafe_allow_html=True)
+    # Two columns of three rows: the tiles stay readable next to the map, and at laptop or split-screen width.
+    m = st.columns(2) + st.columns(2) + st.columns(2)
+    m[0].metric("Distance", f"{ma['distance_km']:.1f} km", f"{ma['edges']} segments", delta_color="off", delta_arrow="off")
+    m[1].metric("Planned time", f"{ma['time_min']:.1f} min", help="GNN-predicted time with no delays.")
+    m[2].metric("Expected with delays", f"{ma['expected_min']:.1f} min",
+                f"+{ma['expected_min'] - ma['time_min']:.1f} min", delta_color="inverse",
+                help="Planned time plus each segment's delay probability × average delay impact.")
+    m[3].metric("90% arrive within", f"{ma['p90_min']:.1f} min",
+                help="90th percentile of 2,000 simulated drives — a safe time to promise.")
+    vtype = plan.get("vehicle_type")
+    if vtype is None:
+        m[4].metric("CO₂", f"{ma['carbon_kg']:.2f} kg", help="For the GNN's reference vehicle (0.27 kg CO₂/km in free flow).")
+    elif VEHICLE_TYPES[vtype].is_ev:
+        m[4].metric("CO₂ (grid electricity)", f"{ma['carbon_kg']:.2f} kg",
+                    help=f"Electricity used × the CEA grid factor ({GRID_KG_CO2_PER_KWH} kg/kWh, FY 2023-24). No "
+                         "tailpipe CO₂; transmission and charging losses not included.")
+    else:
+        m[4].metric("CO₂ (tailpipe)", f"{ma['carbon_kg']:.2f} kg",
+                    help=f"{VEHICLE_TYPES[vtype].label}: {VEHICLE_TYPES[vtype].kg_co2_per_km} kg CO₂/km "
+                         "(India GHG Program, 2015), with the GNN's congestion and weather effects.")
+    if plan["is_ev"]:
+        m[5].metric("EV energy", f"{ma['ev_kwh']:.2f} kWh", help="Expected battery use including typical delays.")
+    else:
+        m[5].metric("EV energy", "—", help="Not an electric vehicle.")
 
-if plan.get("deadline_s"):
-    late = ma["expected_min"] > plan["deadline_s"] / 60
-    (st.error if late else st.success)(
-        f"Expected arrival {ma['expected_min']:.1f} min vs deadline {plan['deadline_s'] / 60:.0f} min — "
-        + ("misses it even on the fastest route." if late else "within the deadline.")
-        + (f" 90% of simulated drives arrive within {ma['p90_min']:.1f} min." if not late else ""))
-    if trace.get("deadline_note"):
-        st.caption(trace["deadline_note"])
-if plan["is_ev"]:
-    ok = ma["ev_kwh"] <= plan["battery_kwh"]
-    (st.success if ok else st.error)(
-        f"Expected EV energy {ma['ev_kwh']:.2f} kWh (typical delays included) vs battery "
-        f"{plan['battery_kwh']:.1f} kWh — "
-        + ("within the battery." if ok else "more than the battery holds."))
+    if plan.get("deadline_s"):
+        late = ma["expected_min"] > plan["deadline_s"] / 60
+        (st.error if late else st.success)(
+            f"Expected arrival {ma['expected_min']:.1f} min vs deadline {plan['deadline_s'] / 60:.0f} min — "
+            + ("misses it even on the fastest route." if late else "within the deadline.")
+            + (f" 90% of simulated drives arrive within {ma['p90_min']:.1f} min." if not late else ""),
+            icon=":material/schedule:" if not late else ":material/alarm_off:")
+        if trace.get("deadline_note"):
+            st.caption(trace["deadline_note"])
+    if plan["is_ev"]:
+        ok = ma["ev_kwh"] <= plan["battery_kwh"]
+        (st.success if ok else st.error)(
+            f"Expected EV energy {ma['ev_kwh']:.2f} kWh (typical delays included) vs battery "
+            f"{plan['battery_kwh']:.1f} kWh — "
+            + ("within the battery." if ok else "more than the battery holds."),
+            icon=":material/battery_charging_full:" if ok else ":material/battery_alert:")
 
-st.info("To introduce a disruption part-way through this trip (a road incident, rain or a traffic build-up) "
-        "and see the system re-plan, go to [On the road](#on-the-road) further down.", icon="🚧")
+    st.caption("Next: add a road incident, rain or a traffic build-up part-way through this trip and see whether the "
+               "system re-plans, under [On the road](#on-the-road).")
 
 # ---- Comparison vs baselines ----------------------------------------------
 st.subheader("Compared with single-objective baselines")
@@ -730,26 +753,38 @@ cmp = pd.DataFrame({
         "CO₂ (kg)": r["carbon_kg"], "EV energy (kWh)": r["ev_kwh"],
     } for k, r in routes.items()
 }).T.loc[[LABELS[k] for k in ("multi_agent", "baseline_time_only", "baseline_carbon_only")]]
-c1, c2 = st.columns([3, 2])
-c1.dataframe(cmp.style.format({"Distance (km)": "{:.2f}", "Planned (min)": "{:.1f}",
-                               "With delays (min)": "{:.1f}", "90% within (min)": "{:.1f}",
-                               "CO₂ (kg)": "{:.3f}", "EV energy (kWh)": "{:.3f}"}),
-             width="stretch")
+ROUTE_ORDER = ("multi_agent", "baseline_time_only", "baseline_carbon_only")
+ui.comparison_table(
+    rows=[(LABELS[k], [routes[k]["distance_km"], routes[k]["time_min"], routes[k]["expected_min"], routes[k]["p90_min"],
+                       routes[k]["carbon_kg"], routes[k]["ev_kwh"]]) for k in ROUTE_ORDER],
+    columns=[("Distance (km)", "{:.2f}"), ("Planned (min)", "{:.1f}"), ("With delays (min)", "{:.1f}"),
+             ("90% within (min)", "{:.1f}"), ("CO₂ (kg)", "{:.3f}"), ("EV energy (kWh)", "{:.3f}")],
+    best={2: "min", 4: "min"},                       # the dot marks the lowest expected time and the lowest CO₂
+    colours=[COLORS[k] for k in ROUTE_ORDER])
 fast, green = routes["baseline_time_only"], routes["baseline_carbon_only"]
-c2.markdown(
-    f"- vs fastest baseline: **{ma['time_min'] - fast['time_min']:+.1f} min**, "
-    f"**{ma['carbon_kg'] - fast['carbon_kg']:+.3f} kg CO₂**\n"
-    f"- vs greenest baseline: **{ma['time_min'] - green['time_min']:+.1f} min**, "
-    f"**{ma['carbon_kg'] - green['carbon_kg']:+.3f} kg CO₂**"
-)
-chart_df = pd.DataFrame({
-    "system": [LABELS[k] for k in routes],
-    "Time (min)": [r["time_min"] for r in routes.values()],
-    "CO₂ (kg)": [r["carbon_kg"] for r in routes.values()],
-}).set_index("system")
-b1, b2 = st.columns(2)
-b1.bar_chart(chart_df[["Time (min)"]], horizontal=True, color=COLORS["multi_agent"])
-b2.bar_chart(chart_df[["CO₂ (kg)"]], horizontal=True, color=COLORS["baseline_carbon_only"])
+
+
+def delta_chip(label: str, value: float, unit: str, fmt: str, eps: float):
+    if abs(value) < eps:
+        return (f"{label}: no change", "info", "drag_handle")
+    good = value < 0                                  # less time and less CO₂ are both better
+    return (f"{label} {value:+{fmt}} {unit}", "good" if good else "bad", "trending_down" if good else "trending_up")
+
+
+ui.delta_chips([
+    delta_chip("Time vs fastest", ma["time_min"] - fast["time_min"], "min", ".1f", 0.05),
+    delta_chip("CO₂ vs fastest", ma["carbon_kg"] - fast["carbon_kg"], "kg", ".3f", 0.0005),
+    delta_chip("Time vs greenest", ma["time_min"] - green["time_min"], "min", ".1f", 0.05),
+    delta_chip("CO₂ vs greenest", ma["carbon_kg"] - green["carbon_kg"], "kg", ".3f", 0.0005)])
+b1, b2 = st.columns(2, gap="large")
+with b1:
+    ui.route_bar_chart([(LABELS[k], routes[k]["time_min"], COLORS[k]) for k in ROUTE_ORDER], "Planned time", "min", ".1f")
+with b2:
+    ui.route_bar_chart([(LABELS[k], routes[k]["carbon_kg"], COLORS[k]) for k in ROUTE_ORDER], "CO₂", "kg", ".2f")
+with st.expander("Table view", icon=":material/table_rows:"):
+    st.dataframe(cmp.style.format({"Distance (km)": "{:.2f}", "Planned (min)": "{:.1f}",
+                                   "With delays (min)": "{:.1f}", "90% within (min)": "{:.1f}",
+                                   "CO₂ (kg)": "{:.3f}", "EV energy (kWh)": "{:.3f}"}), width="stretch")
 
 # ---- On the road: the closed loop -------------------------------------------
 st.subheader("On the road: what if conditions change after the vehicle leaves?", anchor="on-the-road")
@@ -774,7 +809,7 @@ with st.form("loop_form"):
                           help="Incident only. 0 = one road segment; each step adds the neighbouring junctions.")
     loop_slowdown = g3.slider("Incident slowdown", 2.0, 8.0, 4.0, step=0.5, format="x%.1f",
                               help="Incident only: how many times slower traffic is around it (an assumption).")
-    drive_now = st.form_submit_button("🚚 Drive the trip", type="primary")
+    drive_now = st.form_submit_button("Drive the trip", icon=":material/play_arrow:", type="primary")
 
 if drive_now:
     with st.spinner("Driving the trip..."):
@@ -800,10 +835,11 @@ elif loop:
         where_now = (f"{position['elapsed_s'] / 60:.1f} min into the trip, after {position['edges_done']} of "
                      f"{position['edges_total']} road segments")
         if decision["replan"]:
-            st.success(f"**Re-planned.** {loop['event']} The vehicle was {where_now}.", icon="🔁")
+            st.success(f"**Re-planned.** {loop['event']} The vehicle was {where_now}.", icon=":material/alt_route:")
         else:
-            st.info(f"**Kept the planned route.** {loop['event']} The vehicle was {where_now}.", icon="➡️")
-        st.markdown(f"**Decided by** {RULE_LABELS.get(decision['rule'], decision['rule'])}.  \n{decision['reasoning']}")
+            st.info(f"**Kept the planned route.** {loop['event']} The vehicle was {where_now}.", icon=":material/straight:")
+        ui.note(f"<b>Decided by</b> {html.escape(RULE_LABELS.get(decision['rule'], decision['rule']))}.<br>"
+                f"{html.escape(str(decision['reasoning']))}", "gavel")
 
         kept = other if decision["replan"] else outcome   # what finishing the plan gives
         k = st.columns(4)
@@ -845,18 +881,16 @@ elif loop:
             used_kwh = outcome["actual_ev_energy_pct"] / 100 * EV_REFERENCE_KWH
             (st.error if outcome["ev_violation"] else st.success)(
                 f"EV energy used on this drive: {used_kwh:.2f} kWh of a {plan['battery_kwh']:.1f} kWh battery"
-                + (" — the battery ran out." if outcome["ev_violation"] else "."))
+                + (" — the battery ran out." if outcome["ev_violation"] else "."),
+                icon=":material/battery_alert:" if outcome["ev_violation"] else ":material/battery_charging_full:")
 
         st_folium(build_loop_map(nodes_df, edge_geom, plan, loop), height=440, use_container_width=True,
                   returned_objects=[], key="loop_map")
-        taken_label = "new route, taken" if decision["replan"] else "planned route, kept"
-        other_label = "planned route, abandoned" if decision["replan"] else "new route, offered but not taken"
-        st.markdown(
-            f"<span style='color:{LOOP_COLORS['driven']};font-weight:600'>━</span> driven before the change &nbsp; "
-            f"<span style='color:{LOOP_COLORS['taken']};font-weight:600'>━</span> {taken_label} &nbsp; "
-            f"<span style='color:{LOOP_COLORS['not_taken']};font-weight:600'>┅</span> {other_label} &nbsp; "
-            f"<span style='color:{LOOP_COLORS['incident']};font-weight:600'>━</span> ⚠ incident &nbsp; "
-            "🚚 the vehicle when conditions changed", unsafe_allow_html=True)
+        taken_label = "New route, taken" if decision["replan"] else "Planned route, kept"
+        other_label = "Planned route, abandoned" if decision["replan"] else "New route, offered but not taken"
+        ui.legend([("Driven before the change", LOOP_COLORS["driven"], "solid"), (taken_label, LOOP_COLORS["taken"], "solid"),
+                   (other_label, LOOP_COLORS["not_taken"], "dash"), ("Incident (!)", LOOP_COLORS["incident"], "solid"),
+                   ("Vehicle when conditions changed (V)", ui.tokens()["s_aqua"], "dot")])
 
     with st.expander("Telemetry: what the vehicle reported, segment by segment"):
         tel = pd.DataFrame(rep["telemetry"])
@@ -1002,18 +1036,19 @@ if BENCHMARK_CSV.exists():
 # ---- Agent trace -----------------------------------------------------------
 st.subheader("What each agent did")
 w = trace.get("weights", {})
-with st.expander("① Route Agent — priority → solver weights", expanded=True):
+with st.expander("1 · Route Agent: priority to solver weights", expanded=True, icon=":material/tune:"):
     if plan["use_agents"] and trace.get("rounds_used"):
-        st.caption("These are the weights after the Coordinator's EV-range renegotiation (see ②).")
-    st.write({k: round(v, 3) for k, v in w.items()})
+        st.caption("These are the weights after the Coordinator's EV-range renegotiation (see step 2).")
+    ui.weights_meter(w)
     st.caption(trace.get("reasoning") or "")
     if trace.get("swapped"):
         st.info("The Carbon Optimizer later replaced this route with a greener candidate using weights "
-                f"{ {k: round(v, 3) for k, v in trace['final_weights'].items()} } — see ③.")
+                f"{ {k: round(v, 3) for k, v in trace['final_weights'].items()} } (see step 3).",
+                icon=":material/swap_horiz:")
 
 if plan["use_agents"]:
     st.caption(f"Full pipeline took {trace['pipeline_s']:.1f} s.")
-    with st.expander("② Coordinator — conflict negotiation", expanded=bool(trace["rounds_used"])):
+    with st.expander("2 · Coordinator: conflict negotiation", expanded=bool(trace["rounds_used"]), icon=":material/handshake:"):
         st.write(f"Negotiation rounds used: **{trace['rounds_used']}** · "
                  f"fully resolved: **{trace['fully_resolved']}**")
         if trace["rounds_used"]:
@@ -1023,16 +1058,17 @@ if plan["use_agents"]:
         else:
             st.caption("With a single delivery there is no shared-road conflict, and the EV range check "
                        "passed, so no negotiation was needed.")
-    with st.expander("③ Carbon Optimizer — greener swap proposals", expanded=True):
+    with st.expander("3 · Carbon Optimizer: greener swap proposals", expanded=True, icon=":material/eco:"):
         if trace["optimizer"]:
             for d in trace["optimizer"]:
-                verdict = "✅ accepted" if d["accepted"] else "❌ rejected"
-                st.markdown(f"{verdict} — Δ expected time **{d['time_delta_s']:+.0f} s**, "
-                            f"ΔCO₂ **{d['carbon_delta_kg']:+.3f} kg**")
+                verdict = (ui.badge("Accepted", "good", "check_circle") if d["accepted"]
+                           else ui.badge("Rejected", "bad", "cancel"))
+                st.markdown(f"{verdict} &nbsp; Δ expected time **{d['time_delta_s']:+.0f} s**, "
+                            f"ΔCO₂ **{d['carbon_delta_kg']:+.3f} kg**", unsafe_allow_html=True)
                 st.caption(d.get("reasoning") or "")
         else:
             st.write("No candidates evaluated.")
-    with st.expander("④ Execution — simulated drive with noise", expanded=True):
+    with st.expander("4 · Execution: simulated drive with noise", expanded=True, icon=":material/speed:"):
         for rep in trace["execution"]:
             e1, e2, e3, e4 = st.columns(4)
             e1.metric("Expected (with delays)", f"{rep['expected_time_s'] / 60:.1f} min",
@@ -1042,11 +1078,11 @@ if plan["use_agents"]:
             e3.metric("Delayed segments", f"{rep['num_delayed_edges']}/{rep['num_edges']}")
             e4.metric("Re-plan?", "YES" if rep["replan_triggered"] else "no")
             if rep.get("hard_ev_violation"):
-                st.error("Simulated EV energy exceeds the battery — hard re-plan.")
+                st.error("Simulated EV energy exceeds the battery — hard re-plan.", icon=":material/battery_alert:")
             st.caption(rep.get("reasoning") or "Deviation within normal variance; no LLM review needed.")
         st.caption("This flag is raised after the whole simulated trip is over. To see a re-plan happen while the "
                    "vehicle is still driving, use “On the road” above.")
-    with st.expander("⑤ ESG Reporter", expanded=True):
+    with st.expander("5 · ESG Reporter", expanded=True, icon=":material/summarize:"):
         st.write(trace["esg"].get("summary") or "(narrative unavailable)")
-        with st.popover("Raw ESG metrics"):
+        with st.popover("Raw ESG metrics", icon=":material/data_object:"):
             st.json(trace["esg"]["metrics"])

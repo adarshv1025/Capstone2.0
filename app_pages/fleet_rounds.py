@@ -30,6 +30,7 @@ from streamlit_folium import st_folium  # noqa: E402
 
 from app_common import (BENGALURU_CENTER, load_graph, load_snapshot_index, missing_data,  # noqa: E402
                         node_label, predict_costs)
+import ui_theme as ui  # noqa: E402
 from multi_stop import SERVICE_TIME_S, plan_tours, simulate_tours  # noqa: E402
 from routing_solver import RoutingSolver, canonical_edges  # noqa: E402
 from schemas import DeliveryRequest, Vehicle  # noqa: E402
@@ -43,7 +44,7 @@ PRESETS = {
 # Categorical slots 1-3 (light steps; the map tiles are light). Only three:
 # on a map every tour can sit next to every other, and the palette's first
 # three slots are the ones validated all-pairs (dataviz palette.md).
-TOUR_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]
+TOUR_COLORS = [ui.tokens()["s_blue"], ui.tokens()["s_orange"], ui.tokens()["s_aqua"]]
 TYPE_BY_LABEL = {p.label: key for key, p in VEHICLE_TYPES.items()}
 DEFAULT_FLEET = pd.DataFrame([
     {"Vehicle": VEHICLE_TYPES["ev_ldv"].label, "Battery (kWh)": 30.0, "Payload (kg)": 300.0},
@@ -53,7 +54,8 @@ DEFAULT_FLEET = pd.DataFrame([
 METHOD_LABELS = {"optimised": "OR-Tools plan", "nearest_neighbour": "Nearest-neighbour heuristic",
                  "separate_trips": "Every delivery its own trip"}
 
-st.set_page_config(page_title="Multi-stop fleet planner", layout="wide")
+st.set_page_config(page_title="Multi-stop fleet · Bengaluru Logistics", page_icon=":material/local_shipping:", layout="wide")
+ui.inject()
 missing = missing_data()
 if missing:
     st.error("Missing data files: " + ", ".join(str(m) for m in missing))
@@ -71,11 +73,12 @@ ss.setdefault("ms_plan", None)
 
 # ---- Sidebar ---------------------------------------------------------------
 with st.sidebar:
-    st.header("Plan a delivery round")
+    ui.step(1, "Depot and traffic")
     depot_name = st.selectbox("Depot", list(depot_options), key="ms_depot")
     depot = depot_options[depot_name]
     snap_label = st.selectbox(f"Traffic snapshot ({len(snap_df)} available)", snap_df["label"], key="ms_snap",
                               index=int((snap_df["snapshot"] == "snapshot_07241").idxmax()))
+    ui.step(2, "Drop-offs")
     n_stops = st.slider("Drop-offs", 3, 15, 8, key="ms_stops")
     stop_seed = st.number_input("Which drop-offs (random seed)", 0, 999, 0, key="ms_seed",
                                 help="Drop-offs are random junctions 10-40 minutes from the depot.")
@@ -84,7 +87,7 @@ with st.sidebar:
                                help="1.5 × the direct time from the depot + 20 minutes.")
     back = st.toggle("Vehicles return to the depot", value=True, key="ms_return")
     time_limit = st.slider("OR-Tools search time (s)", 1, 10, 3, key="ms_limit")
-    st.markdown("**Fleet** (up to three vehicles)")
+    ui.step(3, "Fleet (up to three vehicles)")
     fleet_df = st.data_editor(
         DEFAULT_FLEET, key="ms_fleet", num_rows="dynamic", hide_index=True, width="stretch",
         column_config={
@@ -93,7 +96,12 @@ with st.sidebar:
                                                            help="Electric vehicles only"),
             "Payload (kg)": st.column_config.NumberColumn(min_value=5.0, max_value=20000.0, required=True),
         })
-    go = st.button("🚚 Plan the round", type="primary", width="stretch")
+    go = st.button("Plan the round", icon=":material/play_arrow:", type="primary", width="stretch")
+    try:
+        st.page_link("app_pages/single_delivery.py", label="Single delivery", icon=":material/alt_route:",
+                     help="One trip from a source to a destination, disruptions on the road, the algorithm comparison")
+    except Exception:  # page run on its own (not through live_app.py)
+        pass
 
 snap_row = snap_df[snap_df["label"] == snap_label].iloc[0]
 costs_df, infer_s = predict_costs(snap_row["file"])
@@ -148,73 +156,61 @@ if go:
                 ss.ms_plan = {"error": f"{type(e).__name__}: {str(e)[:500]}"}
 
 # ---- Header ------------------------------------------------------------------
-st.title("Multi-stop fleet planner")
-try:
-    st.page_link("app_pages/single_delivery.py",
-                 label="One delivery from a source to a destination, disruptions on the road and the "
-                       "algorithm comparison are on the Single delivery page", icon="🚚")
-except Exception:  # page run on its own (not through live_app.py)
-    pass
-st.caption(
-    f"Live GNN v3 inference on **{snap_label}** ({infer_s * 1000:.0f} ms). Several deliveries per vehicle: OR-Tools "
-    "decides which vehicle takes which drop-offs and in what order, within each vehicle's payload, battery and the "
-    "drop-offs' deadlines. Each leg is the route the single-delivery planner would take, on that vehicle's own costs."
-)
+ui.header(
+    "Multi-stop fleet planner",
+    "Several deliveries per vehicle: OR-Tools decides which vehicle takes which drop-offs, and in what order, within each "
+    "vehicle's payload, battery and the drop-offs' deadlines. Each leg is the route the single-delivery planner would take.",
+    chips=[ui.chip("Snapshot", f"{snap_row['date']} {int(snap_row['hour']):02d}:00", "schedule", accent=True),
+           ui.chip(str(snap_row["weather"]), symbol="cloud"),
+           ui.chip("Scored", f"{len(costs_df):,} roads in {infer_s * 1000:.0f} ms", "bolt")],
+    eyebrow="Bengaluru logistics")
 
 result = ss.ms_plan
 if result and "error" in result:
     st.error(result["error"])
 if not result or "error" in result:
-    st.info("Choose a depot, the number of drop-offs and a fleet in the sidebar, then press **Plan the round**.")
+    st.markdown(
+        '<div class="empty"><div class="t">Plan a delivery round in three steps</div><ol>'
+        "<li>Choose a depot, the traffic snapshot and the number of drop-offs.</li>"
+        "<li>Set the priority and up to three vehicles.</li>"
+        "<li>Press <b>Plan the round</b>.</li></ol></div>", unsafe_allow_html=True)
     st.stop()
 
 plan, stops, vehicles, sims = result["plan"], result["stops"], result["vehicles"], result["sims"]
 o = plan["optimised"]
-
-# ---- Comparison ------------------------------------------------------------------
-st.subheader(f"The round — priority “{result['priority']}”, {len(stops)} drop-offs, {len(vehicles)} vehicles")
-rows = {}
-for key, label in METHOD_LABELS.items():
-    r = plan[key]
-    rows[label] = {
-        "Driving + hand-over time (min)": r["total_time_s"] / 60,
-        "CO₂ (kg)": r["total_co2_kg"],
-        "Drop-offs served": f"{r['stops_served']} of {len(stops)}",
-        "Deadlines met (expected)": f"{r['deadlines_met']} of {r['deadlines_total']}" if r["deadlines_total"] else "—",
-    }
-table = pd.DataFrame(rows).T
-c1, c2 = st.columns([3, 2])
-c1.dataframe(table.style.format({"Driving + hand-over time (min)": "{:.0f}", "CO₂ (kg)": "{:.2f}"}),
-             width="stretch")
 nn, sep = plan["nearest_neighbour"], plan["separate_trips"]
-c2.markdown(
-    f"- vs nearest-neighbour: **{o['total_time_s'] / 60 - nn['total_time_s'] / 60:+.0f} min**, "
-    f"**{o['total_co2_kg'] - nn['total_co2_kg']:+.2f} kg CO₂**\n"
-    f"- vs every delivery its own trip: **{o['total_time_s'] / 60 - sep['total_time_s'] / 60:+.0f} min**, "
-    f"**{o['total_co2_kg'] - sep['total_co2_kg']:+.2f} kg CO₂**\n"
-    f"- slowest vehicle back after **{o['makespan_s'] / 60:.0f} min**; vehicles used: **{o['vehicles_used']}**"
-)
 sim_stops = [s for t in sims for s in t["stops"] if s["deadline_s"] is not None]
+met = sum(1 for s in sim_stops if s["simulated_deadline_met"])
+
+# ---- The round at a glance ----------------------------------------------------------
+st.markdown(ui.chip("Priority", result["priority"], accent=True) + " " + ui.chip("Drop-offs", str(len(stops))) + " "
+            + ui.chip("Vehicles", str(len(vehicles))), unsafe_allow_html=True)
+k = st.columns(4)
+k[0].metric("Round time", f"{o['total_time_s'] / 60:.0f} min",
+            f"{o['total_time_s'] / 60 - nn['total_time_s'] / 60:+.0f} min vs nearest-neighbour", delta_color="inverse",
+            help="Driving plus hand-over time, summed over the vehicles. Expected values, typical delays included.")
+k[1].metric("CO₂", f"{o['total_co2_kg']:.1f} kg", f"{o['total_co2_kg'] - nn['total_co2_kg']:+.1f} kg vs nearest-neighbour",
+            delta_color="inverse", help="Each vehicle's own CO₂: tailpipe, or grid electricity for an EV.")
+k[2].metric("Vehicles used", f"{o['vehicles_used']} of {len(vehicles)}",
+            f"slowest back after {o['makespan_s'] / 60:.0f} min", delta_color="off", delta_arrow="off")
 if sim_stops:
-    met = sum(1 for s in sim_stops if s["simulated_deadline_met"])
+    k[3].metric("Deadlines met", f"{met} of {len(sim_stops)}", "in the simulated drive", delta_color="off", delta_arrow="off",
+                help=f"The plan expected {o['deadlines_met']} of {o['deadlines_total']}.")
+else:
+    k[3].metric("Deadlines met", "—", "no deadlines set", delta_color="off", delta_arrow="off")
+if sim_stops:
     (st.success if met == len(sim_stops) else st.warning)(
         f"Driven through the Execution agent's noise model, {met} of {len(sim_stops)} deadlines were met "
-        f"(the plan expected {o['deadlines_met']} of {o['deadlines_total']}).")
+        f"(the plan expected {o['deadlines_met']} of {o['deadlines_total']}).",
+        icon=":material/schedule:" if met == len(sim_stops) else ":material/warning:")
 if o["dropped"]:
-    st.error("Could not be served within the payloads, batteries and deadlines: " + ", ".join(o["dropped"]))
-st.caption(
-    f"Times are expected values (typical delays included) plus {SERVICE_TIME_S // 60} minutes per hand-over. CO₂ is "
-    f"each vehicle's own: tailpipe for combustion vehicles (India GHG Program, 2015), electricity × "
-    f"{GRID_KG_CO2_PER_KWH} kg/kWh (CEA, FY 2023-24) for electric ones. OR-Tools minimises time and CO₂ weighted by "
-    "the priority, summed over the vehicles; it does not try to finish sooner by spreading drop-offs across more "
-    "vehicles unless deadlines require it. 'Every delivery its own trip' is how the single-delivery planner would do "
-    "it: depot → drop-off → depot each time."
-)
+    st.error("Could not be served within the payloads, batteries and deadlines: " + ", ".join(o["dropped"]),
+             icon=":material/block:")
 
 # ---- Map ---------------------------------------------------------------------------
 ce = canonical_edges(costs_df)
 row_of = dict(zip(zip(ce["src"].tolist(), ce["dst"].tolist()), ce.index.tolist()))
-fmap = folium.Map(location=BENGALURU_CENTER, zoom_start=11, tiles="OpenStreetMap", control_scale=True)
+fmap = ui.style_map(folium.Map(location=BENGALURU_CENTER, zoom_start=11, tiles="OpenStreetMap", control_scale=True))
 bounds = []
 for k, tour in enumerate(o["tours"]):
     if not tour["stops"]:
@@ -235,27 +231,57 @@ for k, tour in enumerate(o["tours"]):
             (row.lat, row.lon),
             tooltip=(f"{s['request_id']} — {tour['vehicle_id']} stop {n}, arrives {s['arrival_s'] / 60:.0f} min"
                      + (f", deadline {s['deadline_s'] / 60:.0f} min" if s["deadline_s"] else "")),
-            icon=folium.DivIcon(html=(
-                f"<div style='background:{color};color:#fff;border:2px solid #fff;border-radius:50%;width:24px;"
-                f"height:24px;line-height:20px;text-align:center;font:600 12px sans-serif;"
-                f"{'outline:2px solid #d03b3b;' if late else ''}'>{n}</div>")),
+            icon=ui.pin(str(n), "stop", color=color, flag=late),
         ).add_to(fmap)
 for s in stops:
     if s.request_id in o["dropped"]:
         row = nodes_df.iloc[s.destination]
         folium.Marker((row.lat, row.lon), tooltip=f"{s.request_id} — not served",
-                      icon=folium.Icon(color="gray", icon="ban", prefix="fa")).add_to(fmap)
+                      icon=ui.pin("×", "stop", color=ui.tokens()["muted"])).add_to(fmap)
 d = nodes_df.iloc[result["depot"]]
 folium.Marker((d.lat, d.lon), tooltip=f"Depot: {node_label(nodes_df, result['depot'])}",
-              icon=folium.Icon(color="black", icon="warehouse", prefix="fa")).add_to(fmap)
+              icon=ui.pin("D", "dest")).add_to(fmap)
 bounds.append((d.lat, d.lon))
 if len(bounds) >= 2:
     fmap.fit_bounds(bounds, padding=(30, 30))
 st_folium(fmap, height=520, use_container_width=True, returned_objects=[], key="ms_map")
-legend = " &nbsp; ".join(
-    f"<span style='color:{TOUR_COLORS[k % 3]};font-weight:600'>━</span> {t['vehicle_id']} · {t['vehicle_label']}"
-    for k, t in enumerate(o["tours"]) if t["stops"])
-st.markdown(legend + " &nbsp; numbers = order of drop-offs", unsafe_allow_html=True)
+ui.legend([(f"{t['vehicle_id']} · {t['vehicle_label']}", TOUR_COLORS[k % 3], "solid")
+           for k, t in enumerate(o["tours"]) if t["stops"]] + [("Numbers show the order of drop-offs; D is the depot", ui.tokens()["muted"], "dot")])
+
+# ---- How the plan compares ----------------------------------------------------------
+st.subheader("How the plan compares")
+METHOD_KEYS = ("optimised", "nearest_neighbour", "separate_trips")
+MCOL = ui.route_colors()
+ui.comparison_table(
+    rows=[(METHOD_LABELS[key], [plan[key]["total_time_s"] / 60, plan[key]["total_co2_kg"], f"{plan[key]['stops_served']} of {len(stops)}",
+                                 (f"{plan[key]['deadlines_met']} of {plan[key]['deadlines_total']}" if plan[key]["deadlines_total"] else "—")])
+          for key in METHOD_KEYS],
+    columns=[("Driving + hand-over (min)", "{:.0f}"), ("CO₂ (kg)", "{:.2f}"), ("Drop-offs served", "{}"),
+             ("Deadlines met (expected)", "{}")],
+    best={0: "min", 1: "min"},
+    colours=[MCOL["multi_agent"], MCOL["baseline_time_only"], MCOL["baseline_carbon_only"]])
+d_sep_t, d_sep_c = o["total_time_s"] / 60 - sep["total_time_s"] / 60, o["total_co2_kg"] - sep["total_co2_kg"]
+ui.delta_chips([
+    (f"Time vs every delivery its own trip {d_sep_t:+.0f} min", "good" if d_sep_t < 0 else "bad", "trending_down" if d_sep_t < 0 else "trending_up"),
+    (f"CO₂ vs every delivery its own trip {d_sep_c:+.2f} kg", "good" if d_sep_c < 0 else "bad", "trending_down" if d_sep_c < 0 else "trending_up")])
+with st.expander("Table view", icon=":material/table_rows:"):
+    rows = {}
+    for key in METHOD_KEYS:
+        r = plan[key]
+        rows[METHOD_LABELS[key]] = {
+            "Driving + hand-over time (min)": r["total_time_s"] / 60, "CO₂ (kg)": r["total_co2_kg"],
+            "Drop-offs served": f"{r['stops_served']} of {len(stops)}",
+            "Deadlines met (expected)": f"{r['deadlines_met']} of {r['deadlines_total']}" if r["deadlines_total"] else "—"}
+    st.dataframe(pd.DataFrame(rows).T.style.format({"Driving + hand-over time (min)": "{:.0f}", "CO₂ (kg)": "{:.2f}"}),
+                 width="stretch")
+with st.expander("How these numbers are computed", icon=":material/info:"):
+    st.caption(
+        f"Times are expected values (typical delays included) plus {SERVICE_TIME_S // 60} minutes per hand-over. CO₂ is "
+        f"each vehicle's own: tailpipe for combustion vehicles (India GHG Program, 2015), electricity × "
+        f"{GRID_KG_CO2_PER_KWH} kg/kWh (CEA, FY 2023-24) for electric ones. OR-Tools minimises time and CO₂ weighted by "
+        "the priority, summed over the vehicles; it does not try to finish sooner by spreading drop-offs across more "
+        "vehicles unless deadlines require it. 'Every delivery its own trip' is how the single-delivery planner would do "
+        "it: depot → drop-off → depot each time.")
 
 # ---- Per vehicle ------------------------------------------------------------------
 st.subheader("Each vehicle's round")
@@ -265,7 +291,7 @@ for k, tour in enumerate(o["tours"]):
             f"{tour['time_s'] / 60:.0f} min, {tour['co2_kg']:.2f} kg CO₂, load {tour['load_kg']:.0f} of "
             f"{tour['max_payload_kg']:.0f} kg"
             + (f", {tour['energy_kwh']:.1f} of {tour['battery_kwh']:.0f} kWh" if tour["is_ev"] else ""))
-    with st.expander(head, expanded=bool(tour["stops"])):
+    with st.expander(head, expanded=bool(tour["stops"]), icon=":material/local_shipping:"):
         if not tour["stops"]:
             st.write("Not used: the other vehicles cover the round at lower cost for this priority.")
             continue
@@ -279,5 +305,5 @@ for k, tour in enumerate(o["tours"]):
                                          ("yes" if simulated.get(s["request_id"], {}).get("simulated_deadline_met")
                                           else "no")),
         } for n, s in enumerate(tour["stops"], start=1)]).style.format({
-            "Expected arrival (min)": "{:.0f}", "Simulated arrival (min)": "{:.0f}", "Deadline (min)": "{:.0f}"}),
+            "Expected arrival (min)": "{:.0f}", "Simulated arrival (min)": "{:.0f}", "Deadline (min)": "{:.0f}"}, na_rep="—"),
             width="stretch", hide_index=True)

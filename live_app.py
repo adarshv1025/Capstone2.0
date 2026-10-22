@@ -21,10 +21,10 @@ automatic page list showed it only as "live app", which was easy to miss.)
 
 import streamlit as st
 
-st.set_page_config(page_title="Bengaluru Logistics", layout="wide")
+st.set_page_config(page_title="Bengaluru Logistics", page_icon=":material/alt_route:", layout="wide")
 
-SINGLE_DELIVERY = st.Page("app_pages/single_delivery.py", title="Single delivery: source → destination",
-                          icon="🚚", default=True)
-FLEET_ROUNDS = st.Page("app_pages/fleet_rounds.py", title="Multi-stop fleet planner", icon="🗺️")
+SINGLE_DELIVERY = st.Page("app_pages/single_delivery.py", title="Single delivery",
+                          icon=":material/alt_route:", default=True)
+FLEET_ROUNDS = st.Page("app_pages/fleet_rounds.py", title="Multi-stop fleet", icon=":material/local_shipping:")
 
 st.navigation([SINGLE_DELIVERY, FLEET_ROUNDS]).run()
