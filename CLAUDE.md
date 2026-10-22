@@ -2222,3 +2222,74 @@ The deck was not rehearsed with the team or checked against a department
 template for Review 3 (none was available; it follows the Review 1/2
 format). Slide timing: about 20-25 minutes for 19 slides; slides 2, 10 and
 16 can be skipped for a 15-minute slot.
+
+---
+
+## 15. UI design system (branch `better`, 2026-10-22)
+
+The app's look is defined in two files and the pages only call them. **No agent,
+solver or page logic changed**; every widget key and label that code or tests
+look up is unchanged.
+
+- `.streamlit/config.toml`: native theme for light and dark (the app follows the
+  viewer's setting), semantic colours, `toolbarMode = "minimal"` (hides Deploy).
+- `ui_theme.py`: tokens, global CSS (`inject()`), and components: `header`,
+  `chip`, `step`, `note`, `badge`, `legend`, `ends`, `weights_meter`,
+  `comparison_table`, `delta_chips`, `route_bar_chart`, `style_map`, `pin`.
+  Each page calls `ui.inject()` right after `st.set_page_config`.
+
+### 15.1 Rules (so a future page looks like the rest)
+
+1. **Colour.** Neutrals and the three series colours are the validated dataviz
+   palette (both modes). The accent is its blue: it means "our system" (the
+   multi-agent route, primary buttons, the active page). Orange and aqua are the
+   two baselines, on the map, in the table and in the charts. **Red is for
+   critical states only** (a battery that runs out, a closed road, a bad delta).
+2. **Icons.** Material Symbols only: `icon=":material/name:"` on buttons,
+   expanders, alerts and page links; `ui.icon()` inside HTML components. No emoji.
+3. **Text wears text tokens;** colour appears on marks (a dot, a line, a bar), and
+   a status is always icon plus label (`ui.badge`), never colour alone.
+4. **Native widgets stay native** (`st.metric`, `st.dataframe`, `st.expander`), only
+   styled, so `AppTest` and screen readers still see them. Every custom table has
+   a "Table view" expander with the plain dataframe.
+5. **Words.** No "live" for anything that is not live traffic: the page title is
+   "Route planner"; the badge says "Scored 15,083 roads in N ms".
+6. **Type.** The system sans stack (`"Segoe UI Variable Text", "Segoe UI",
+   system-ui, ...`), no web font. JetBrains Mono was tried for all text (bundled
+   font files, `theme.fontFaces`, `server.enableStaticServing`) and reverted on
+   request: it is about 20% wider and the app has many explanatory sentences, so
+   it needed shrunken tiles and shortened labels. If a monospace face is wanted
+   again, use it for numbers and tables only, not body text.
+7. **Map.** The standard light OpenStreetMap in both themes (no tile filter); the
+   pins, zoom buttons and reference dots are styled for a light map.
+
+### 15.2 Layout
+
+Planner: header and snapshot chips, the quick-start note, then **map (left, 60%)
+beside the headline tiles (right, 40%)**, then the comparison, "On the road",
+the Dijkstra vs Tsinghua panel and the agent trace. Fleet: header, KPI row, the
+deadline banner, map, comparison, per-vehicle rounds. The basemap is the same
+OpenStreetMap tiles, always light (an earlier version of this redesign used a muted grey map in
+light and an inverted map in dark; both were dropped on request); pins are lettered
+(A source, B destination, D depot, V vehicle, ! incident, numbers for stops).
+
+### 15.3 Things to know
+
+- **Restart Streamlit after editing `ui_theme.py`** (a refresh reloads only the
+  page script, not imported modules).
+- `st.metric` values scale with the window (`clamp()`), because a narrow column
+  clipped them ("22.2 ...") at 1100 px.
+- `scenario_label` (the quick-start display name) is idempotent: Streamlit's
+  `AppTest` applies a `format_func` twice. In tests select a scenario with
+  `selectbox.select_index(i)`.
+- The scenario keys keep their circled digits (the docs and the deck refer to
+  them); only the display changed.
+- To look at the result, drive the app with a real browser (Playwright on the
+  installed Chrome works: no browser download needed); `AppTest` cannot see CSS.
+
+### 15.4 Checked and not done
+
+Checked in Chrome, dark and light, at 1440 and 1100 px, LLM off and on, empty and
+after a drive; all numbers identical to before (CHANGELOG 22 Oct). Not done: the
+fleet editor in the sidebar shows only its first column in the narrow sidebar
+(it scrolls); no mobile layout (the app is for a laptop or projector).

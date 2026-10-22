@@ -13,8 +13,66 @@ Where to look for more:
   the standing data limitation.
 - `git log` — the commits listed at the bottom of this file.
 
-Branch: `aayanvikramsingh` on `adarshv1025/Capstone2.0`. `main` is unchanged
-since the original two commits.
+Branches on `adarshv1025/Capstone2.0`: `aayanvikramsingh` (Phases 1-6 and the
+handover) and `better` (the UI redesign, from 22 Oct 2026, local until pushed).
+`main` is unchanged since the original two commits.
+
+---
+
+## 22 Oct 2026 — UI redesign (branch `better`)
+
+Details: `CLAUDE.md` section 15. Built on a new branch cut from
+`aayanvikramsingh` (`9e26468`); nothing is committed yet. **No logic changed.**
+
+- **What:** a design system for the Streamlit app and a restyle of both pages.
+  `.streamlit/config.toml` (light and dark themes, minimal toolbar, so the
+  "Deploy" button is gone) and `ui_theme.py` (tokens, global CSS, small
+  components). Emoji replaced by Material icons everywhere. One accent (the
+  palette's blue = "our system"; red only for critical). Stat tiles as cards;
+  on the planner the map and the headline numbers now sit side by side;
+  a quieter, theme-aware basemap with lettered A/B pins; a comparison table with
+  a colour key per route and a dot on the best value; thin route bar charts with
+  direct labels; the agent trace as numbered icon cards with the solver weights
+  as bars and Accepted/Rejected badges; a KPI row, coloured stop pins and a
+  comparison table on the fleet page; empty states with three steps.
+- **Map (same day, on request):** the basemap is the standard light
+  OpenStreetMap in **both** app themes. The first version of the redesign
+  inverted it in dark mode and greyed it in light mode; both filters were
+  removed, and the pins, zoom buttons and reference dots are styled for a light
+  map.
+- **Font tried and reverted (same day):** all text was switched to JetBrains Mono
+  (bundled in `static/fonts/`, registered with `theme.fontFaces`), then reverted
+  on request: it was judged a poorer fit for this project, because monospace
+  is about 20% wider and the app has many explanatory sentences. Text is back
+  to the system sans stack (Segoe UI first). The font files, the static-serving
+  setting and the layout tweaks made only for the wider font (smaller tile
+  values and deltas, a 5:4 column split, shortened tile deltas) were removed.
+- **Names and wording:** the pages are now "Single delivery" and "Multi-stop
+  fleet"; the page title is "Route planner" (it said "Live Route Planner", which
+  implied live traffic; the project has none); the scenario picker is "Quick start
+  scenario" and shows "1 · Greener vs faster: ..." (the circled digits stay in the
+  internal keys, which the docs and the deck use). "Planned route" and the other
+  headings are unchanged.
+- **Why:** the old look was Streamlit's default with a red accent, emoji icons,
+  a flat hierarchy, a cramped comparison table with clipped columns and a busy
+  basemap; it read as generated rather than designed.
+- **Files:** new `.streamlit/config.toml`, `ui_theme.py`. Changed `live_app.py`,
+  `app_pages/single_delivery.py`, `app_pages/fleet_rounds.py`, `README.md`,
+  `docs/review3_demo_script.md` (UI names), `CLAUDE.md` 15, this entry.
+- **Checked:** every number is unchanged (scenario 1: 9.7 km, 22.2 min, 2.95 kg;
+  incident re-plan 30.8 -> 22.5 min; Tsinghua gives the same route; all six
+  scenarios; multi-stop 284 min / 16.6 kg, 4 of 4 deadlines); the 29 tests that
+  need no key pass. The pages were rendered in real Chrome in dark and light, at
+  1440 and 1100 px, with the LLM off and on, empty and after a drive, and the
+  screenshots were inspected. Two defects found that way and fixed: stat-tile
+  values clipping in a narrow column (now scale with the window) and a double
+  border on banners.
+- **Gotchas recorded:** restart Streamlit after editing `ui_theme.py`; a page
+  refresh does not reload it. The scenario label function is idempotent because
+  Streamlit's AppTest applies a `format_func` twice.
+- **Not done:** the fleet editor in the sidebar still shows only its first column
+  in the narrow sidebar (a horizontal scroll reveals the rest); the Altair
+  benchmark chart keeps its own colours (already from the same palette).
 
 ---
 

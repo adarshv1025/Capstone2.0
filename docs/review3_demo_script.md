@@ -12,8 +12,8 @@ every slide has speaker notes. Numbers below were measured on 14 Oct 2026.
    streamlit run live_app.py
    ```
 
-   It opens on **Single delivery: source → destination**. The sidebar also
-   lists **Multi-stop fleet planner**.
+   It opens on **Single delivery** (the route planner). The sidebar also
+   lists **Multi-stop fleet**.
 2. Plan one route with the LLM on, to warm up the GNN and check the Groq key
    has quota. One plan uses about 3-4k tokens; the demo below about 10k.
 3. If Groq is rate-limited or the network is down, switch **Use multi-agent
@@ -25,8 +25,9 @@ every slide has speaker notes. Numbers below were measured on 14 Oct 2026.
 
 ### 1. Plan a delivery
 
-Sidebar → **Demo scenario** → ① *Greener vs faster — Peenya → Rajajinagar,
-9 AM* → **Plan route**.
+Sidebar → **Quick start scenario** → *1 · Greener vs faster: Peenya →
+Rajajinagar, 9 AM* (the scenarios are numbered 1-6; the circled ①-⑥ used
+elsewhere in these notes and in the deck are the same ones) → **Plan route**.
 
 | | LLM on (varies slightly) | LLM off (fixed) |
 |---|---|---|
@@ -41,7 +42,8 @@ always comes from the shortest-path solver, never from the LLM.
 
 ### 2. Disrupt it
 
-Scroll to **On the road** (or the 🚧 link). Keep the defaults: *A road
+Scroll to **On the road** (or follow the "Next:" link under the headline
+numbers). Keep the defaults: *A road
 incident ahead on the route*, 30%, *Tell the planner* on → **Drive the trip**.
 
 | | LLM on | LLM off |
@@ -72,7 +74,7 @@ feedback), learned only from the first vehicle's telemetry.
 
 ### 4. A delivery round
 
-Sidebar → **Multi-stop fleet planner** → Depot *Koramangala Depot*, 8
+Sidebar → **Multi-stop fleet** → Depot *Koramangala Depot*, 8
 drop-offs, priority *greenest*, deadlines on, default fleet (EV, diesel van,
 CNG three-wheeler) → **Plan the round**.
 

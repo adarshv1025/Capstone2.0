@@ -47,6 +47,7 @@ agents/              the six agents, pipeline, feedback loop, vehicle types, mul
 agents/evaluation_results/   evaluation, re-plan, multi-stop and benchmark results (CSV)
 sample_costs/        GNN predictions for 5 snapshots (CSV), for running agents without PyTorch
 live_app.py          entry point of the Streamlit app (lists the two pages)
+ui_theme.py          the app's visual design: colours, CSS, small components (with .streamlit/config.toml)
 app_pages/           single_delivery.py (map, live GNN, agents, disruptions) and fleet_rounds.py (multi-stop)
 app_common.py        loaders and helpers shared by the two app pages
 CLAUDE.md            full design log, findings and the measured audit (section 7)
@@ -124,10 +125,11 @@ sidebar), choose the traffic snapshot, priority and vehicle, and press
 **Plan route**. Switching off "Use multi-agent LLM pipeline" plans instantly
 with fixed weights and uses no tokens.
 
-The app has two pages, listed at the top of the sidebar: **Single delivery:
-source → destination** (opens first; everything described here, plus a
-vehicle type and an optional deadline) and **Multi-stop fleet planner**,
-which plans a delivery round for up to three vehicles with OR-Tools.
+The app has two pages, listed at the top of the sidebar: **Single delivery**
+(opens first; everything described here, plus a vehicle type and an optional
+deadline) and **Multi-stop fleet**, which plans a delivery round for up to
+three vehicles with OR-Tools. The look (theme, tiles, map, icons) is defined
+in `.streamlit/config.toml` and `ui_theme.py`; the pages' logic is unchanged.
 
 Under every planned route, **On the road** drives the trip through a change
 of conditions (a road incident, rain, a traffic build-up, the next traffic
