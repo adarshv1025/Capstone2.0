@@ -2265,7 +2265,7 @@ look up is unchanged.
 
 ### 15.2 Layout
 
-Planner: header and snapshot chips, the quick-start note, then **map (left, 60%)
+Planner: header and snapshot chips, then **map (left, 60%)
 beside the headline tiles (right, 40%)**, then the comparison, "On the road",
 the Dijkstra vs Tsinghua panel and the agent trace. Fleet: header, KPI row, the
 deadline banner, map, comparison, per-vehicle rounds. The basemap is the same
@@ -2284,6 +2284,10 @@ light and an inverted map in dark; both were dropped on request); pins are lette
   `selectbox.select_index(i)`.
 - The scenario keys keep their circled digits (the docs and the deck refer to
   them); only the display changed.
+- The scenarios' talking points (`DEMO_SCENARIOS[...]["talk"]`) are not drawn on
+  the page any more: they are the hover tooltip (?) of the *Quick start scenario*
+  field (`scenario_help()`), so the screen stays clean and the speaker can still
+  read them. Keep any new scenario's `talk` text there, not in a note box.
 - To look at the result, drive the app with a real browser (Playwright on the
   installed Chrome works: no browser download needed); `AppTest` cannot see CSS.
 

@@ -35,6 +35,17 @@ Details: `CLAUDE.md` section 15. Built on a new branch cut from
   direct labels; the agent trace as numbered icon cards with the solver weights
   as bars and Accepted/Rejected badges; a KPI row, coloured stop pins and a
   comparison table on the fleet page; empty states with three steps.
+- **Text removed (23 Oct, on request):** the blue scenario note above the map
+  (the speaker's talking points) and the caption under **Plan route** in the
+  sidebar ("After planning, add an incident ..."), because the screen already
+  says it visually. The `talk` strings stay in `DEMO_SCENARIOS` and are now the
+  **hover tooltip (?)** on the *Quick start scenario* field (`scenario_help()` in
+  `app_pages/single_delivery.py`): hover it to see the chosen scenario's title and
+  talking points, plus a one-line "press Plan route" hint when none is chosen.
+  The same text is mirrored in `docs/review3_demo_script.md`; the "Next:" hint
+  under the headline tiles stays. No numbers changed (scenario 1 still
+  9.7 km / 22.2 min / 2.95 kg; all six scenarios and the Tsinghua check
+  identical).
 - **Map (same day, on request):** the basemap is the standard light
   OpenStreetMap in **both** app themes. The first version of the redesign
   inverted it in dark mode and greyed it in light mode; both filters were

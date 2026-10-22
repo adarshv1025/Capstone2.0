@@ -123,6 +123,8 @@ TIME_JITTER_PCT = 0.10  # mirrors agents/execution_agent.py; DELAY_EXTRA_TIME_RA
 # dataset_kaggle/test file stems. Numbers in the talking points were
 # re-measured on 2026-10-11 after the routing fixes (CLAUDE.md 9) with the
 # solver-only presets; "expected" means expected time including delays.
+# `talk` is the speaker's note for the scenario. It is shown only as the hover tooltip (?) of
+# the Quick start field (scenario_help); docs/review3_demo_script.md carries the same points.
 DEMO_SCENARIOS = {
     "① Greener vs faster — Peenya → Rajajinagar, 9 AM": dict(
         src=5562, dst=1216, snapshot="snapshot_07241", priority="fastest", custom="", ev=True, battery=20.0, seed=0,
@@ -557,10 +559,17 @@ def scenario_label(key: str) -> str:
     return f"{number} · {title}: {trip}" if trip else f"{number} · {title}"
 
 
+def scenario_help(key: str) -> str:
+    """The (?) tooltip of the quick-start field: how it works, and the chosen scenario's talking points."""
+    how = "Loads a prepared trip with every setting below. Press Plan route to run it."
+    if key in DEMO_SCENARIOS:
+        return f"**{scenario_label(key)}**\n\n{DEMO_SCENARIOS[key]['talk']}\n\n{how}"
+    return how
+
+
 with st.sidebar:
     st.selectbox("Quick start scenario", ["—"] + list(DEMO_SCENARIOS), key="scenario", on_change=load_scenario,
-                 format_func=scenario_label,
-                 help="Loads a prepared trip with every setting below. Press Plan route to run it.")
+                 format_func=scenario_label, help=scenario_help(ss.scenario))
 
     ui.step(1, "Route")
     click_target = st.radio("A click on the map sets the…", ["Source", "Destination"],
@@ -615,8 +624,6 @@ with st.sidebar:
              "asymptotically faster than Dijkstra but slower at this graph size.")]
     go = st.button("Plan route", icon=":material/play_arrow:", type="primary", width="stretch",
                    disabled=ss.src is None or ss.dst is None or ss.src == ss.dst)
-    st.caption("After planning, add an incident, rain or a traffic build-up part-way through the trip and see "
-               "whether the system re-plans: [On the road](#on-the-road), below the route.")
     try:
         st.page_link("app_pages/fleet_rounds.py", label="Fleet planner", icon=":material/local_shipping:",
                      help="Several drop-offs per vehicle")
@@ -652,8 +659,6 @@ ui.header(
     eyebrow="Bengaluru logistics")
 if ss.plan and "error" in ss.plan:
     st.error(ss.plan["error"])
-if ss.scenario in DEMO_SCENARIOS:
-    ui.note(f"<b>{html.escape(scenario_label(ss.scenario))}</b><br>{html.escape(DEMO_SCENARIOS[ss.scenario]['talk'])}", "lightbulb")
 
 # ---- Map (left) and the headline result (right) ------------------------------
 if plan:
